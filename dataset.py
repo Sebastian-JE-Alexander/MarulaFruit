@@ -2,7 +2,7 @@
 dataset.py
 PyTorch Dataset/DataLoader for the classifier, using
 torchvision.datasets.ImageFolder - it infers class labels directly from
-subfolder names (dataset/train/good/, dataset/train/missing_open_eyelid/,
+subfolder names (dataset_images/train/good/, dataset_images/train/missing_open_eyelid/,
 ...), sorted alphabetically to assign indices (0=good, 1=missing_open_eyelid).
 This is also what makes adding a 3rd class later a data change, not a
 code change - a new subfolder is automatically picked up.

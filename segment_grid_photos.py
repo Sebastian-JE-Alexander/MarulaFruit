@@ -3,8 +3,8 @@
 
 Splits 3x3 grid photos of ONE class into individual shell crops, using
 Otsu-based segmentation.
-Saves into dataset/train/<class_name>/ and dataset/validation/<class_name>/,
-matching the folder-per-class structure dataset.py's ImageFolder
+Saves into dataset_images/train/<class_name>/ and dataset_images/validation/<class_name>/,
+matching the folder-per-class structure dataset_images.py's ImageFolder
 expects.
 
 Run this once per class.
@@ -155,8 +155,8 @@ def crop_shell(gray, box, pad_factor=1.25, out_size=160):
     return cv2.resize(crop, (out_size, out_size))
 
 
-def process_class(input_dir, class_name, train_root="dataset/train",
-                   val_root="dataset/validation", val_fraction=0.2, seed=42,
+def process_class(input_dir, class_name, train_root="dataset_images/train",
+                   val_root="dataset_images/validation", val_fraction=0.2, seed=42,
                    min_area=5000, expected_per_photo=9):
     """
     Random photo-level split - ONLY safe when every photo in input_dir
@@ -188,7 +188,7 @@ def process_class(input_dir, class_name, train_root="dataset/train",
 
 
 def process_two_folders(train_input_dir, val_input_dir, class_name,
-                         train_root="dataset/train", val_root="dataset/validation",
+                         train_root="dataset_images/train", val_root="dataset_images/validation",
                          min_area=5000, expected_per_photo=9):
     """
     Use this when you've reshuffled/rephotographed the same physical
@@ -269,7 +269,7 @@ if __name__ == "__main__":
                               "this as the VALIDATION photo folder. No random splitting is done "
                               "in this mode - each folder is processed as-is.")
     parser.add_argument("--class_name", required=True,
-                         help="Class name - becomes the subfolder name under dataset/train and dataset/validation")
+                         help="Class name - becomes the subfolder name under dataset_images/train and dataset_images/validation")
     args = parser.parse_args()
 
     if args.val_input_dir:

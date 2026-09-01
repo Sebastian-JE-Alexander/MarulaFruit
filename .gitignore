@@ -15,7 +15,7 @@ __pycache__/
 Thumbs.db
 
 # --- Common data/output folders (uncomment/add as needed) ---
-dataset/
+dataset_images/
 outputs/
 *.pt
 *.pth
