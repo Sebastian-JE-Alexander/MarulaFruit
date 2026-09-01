@@ -1,0 +1,22 @@
+# --- Virtual environment ---
+.venv/
+venv/
+
+# --- Python bytecode/cache ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- PyCharm project settings ---
+.idea/
+
+# --- OS junk files ---
+.DS_Store
+Thumbs.db
+
+# --- Common data/output folders (uncomment/add as needed) ---
+dataset/
+outputs/
+*.pt
+*.pth
+Missing_Open_Eyes/
