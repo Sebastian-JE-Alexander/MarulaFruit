@@ -1,5 +1,5 @@
 """
---------------------------------- segment_grid_photos.py -----------------------
+--------------------------------- segment_grid_photos.py --------------------------------
 
 Splits 3x3 grid photos of ONE class into individual shell crops, using
 Otsu-based segmentation.
@@ -16,6 +16,7 @@ train/validation - same physical-shell-leakage reasoning as before: if
 any photos are reshuffled/rephotographed shots of the same physical
 shells, keeping whole photos on one side of the split guarantees no
 crossover between validation and training images.
+--------------------------------------------------------------------------------------------
 """
 
 import os

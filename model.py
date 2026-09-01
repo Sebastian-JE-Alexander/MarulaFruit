@@ -20,6 +20,7 @@ visual signal:
 
   * Grayscale input (1 channel) - the physical camera is monochrome (Mono8),
     and neither class needs colour/hue to distinguish for the moment.
+---------------------------------------------------------------------------------
 """
 
 import torch

@@ -8,6 +8,7 @@ add a third class by creating dataset_images/train/<new_class>/ and
 dataset_images/validation/<new_class>/ folders - ImageFolder (used in
 dataset_images.py) infers classes from folder names automatically, and the
 model's output layer size is driven by len(CLASS_NAMES) here, not hardcoded.
+-------------------------------------------------------------------------------
 """
 
 IMG_SIZE = 128

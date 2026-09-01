@@ -9,6 +9,7 @@ shells are in a frame and hands each one to the classifier separately.
 
 
 Usage: python detect_and_classify.py path/to/image.png [--output path/to/annotated.png]
+------------------------------------------------------------------------------------------
 """
 
 import argparse

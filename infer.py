@@ -7,6 +7,7 @@ inference timing - only the model forward pass is timed, not image load/preproce
 call is reported separately since it includes first time warmup cycle.
 
 Usage: python infer.py path/to/image.png [path/to/another.png ...]
+---------------------------------------------------------------------------------------------------
 """
 
 import sys

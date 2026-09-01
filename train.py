@@ -4,7 +4,7 @@ Trains the good vs missing_open_eyelid classifier, tracking loss AND
 accuracy per epoch for both train and validation.
 After training, evaluates on the validation set and plots a confusion
 matrix.
-
+-----------------------------------------------------------------------
 """
 
 import os
@@ -113,6 +113,11 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
 
 
 def plot_history(history):
+    """
+    We need to be able to plot the training history so that we can see how the model
+    is progressing across the epochs. This will also help us with adjusting the various
+    parameters of the model as it trains (e.g. number of epochs, learning rate etc.)
+    """
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
     ax1.plot(history["train_loss"], label="Training Loss")
@@ -138,6 +143,12 @@ def plot_history(history):
 
 
 def plot_confusion_matrix(model, val_loader, device, classes):
+    """
+    We need to be able to evaluate the trained model before we can begin testing
+    the inference, so an easy way is to generate a confusion matrix of the model
+    after it has completed training, this will allow us to view how the model is
+    handling the different classes.
+    """
     model.eval()
     y_true, y_pred = [], []
     with torch.no_grad():
