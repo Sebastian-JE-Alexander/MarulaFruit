@@ -26,6 +26,7 @@ visual signal:
 import torch
 import torch.nn as nn
 
+
 class ShellClassifier(nn.Module):
     def __init__(self, img_size=128, num_classes=2):
         super().__init__()

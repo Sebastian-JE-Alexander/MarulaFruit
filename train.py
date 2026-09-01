@@ -55,7 +55,8 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     # 2) Learning rate = 1e-3
     # 3) weight decay = 1e-4
     # 5) patience = 8
-    # Remember to only adjust one value at a time across retrains to be able to track how they affect the overall training
+    # Remember to only adjust one value at a time across retrains to be able to track how they affect the overall training.
+    # Only adjust values after referring to the confusion matrix and model loss chart of the last training session.
 
     os.makedirs("outputs", exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #checks to see if the gpu is available for training otherwise run on the cpu.

@@ -27,9 +27,9 @@ def load_model(weights_path="outputs/shell_classifer.pth",
     with open(classes_path) as f:
         classes = f.read().strip.split("\n")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #CUDA cores come from graphics card, if no gpu present defaults to cpu which does run slower
-    model = ShellClassifier(img_size=128, num_classes=len(classes)).to(device)
-    model.load_state_dict(torch.load(weights_path, map_location=device))   #loads the model onto the device (GPU or CPU)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")       # CUDA cores come from graphics card, if no gpu present defaults to cpu which does run slower
+    model = ShellClassifier(img_size=128, num_classes=len(classes)).to(device)  # Specifies which model to be loaded with the amount of classes
+    model.load_state_dict(torch.load(weights_path, map_location=device))        # loads the model onto the device (GPU or CPU)
     model.eval()
     return model,device,classes
 
