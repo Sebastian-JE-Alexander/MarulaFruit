@@ -94,9 +94,9 @@ def find_blobs(gray, min_area=5000, max_aspect=2.5, use_adaptive=True):
 def _reject_size_outliers(boxes, min_fraction_of_median=0.35):
     """
     Rejects blobs much smaller than the median blob size in this
-    image - real shells in one photo should all be roughly consistent
+    image. Real shells in an image should all be roughly consistent
     size, so a blob at a fraction of that size is far more likely to be
-    a small artifact (a shadow, a lighting speck near the frame edge)
+    an artifact (a shadow, a lighting speck near the frame edge)
     than a genuine shell. More robust than a fixed min_area, which has
     to be re-tuned any time image resolution or the distance from the
     camera changes; this adapts automatically to whatever scale the
@@ -160,7 +160,7 @@ def process_class(input_dir, class_name, train_root="dataset_images/train",
                    val_root="dataset_images/validation", val_fraction=0.2, seed=42,
                    min_area=5000, expected_per_photo=9):
     """
-    Random photo-level split - ONLY safe when every photo in input_dir
+    Random split, ONLY safe when every photo in input_dir
     shows genuinely independent physical shells never repeated in any
     other photo (no reshuffling/rephotographing the same batch). If
     you're reshuffling the same shells for extra pose variety, use

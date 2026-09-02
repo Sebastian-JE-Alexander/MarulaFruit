@@ -1,13 +1,15 @@
 """
 --------------------------------- train.py ---------------------------
-Trains the good vs missing_open_eyelid classifier, tracking loss AND
+Trains the good vs bad shell classifier, tracking model loss and
 accuracy per epoch for both train and validation.
 After training, evaluates on the validation set and plots a confusion
 matrix.
+
 -----------------------------------------------------------------------
 """
 
 import os
+import time
 
 import torch
 import torch.nn as nn
@@ -18,6 +20,17 @@ import numpy as np
 
 from model import ShellClassifier
 from dataset import make_loader
+
+
+def format_duration(seconds):
+    """
+    HH:MM:SS for anything over an hour, otherwise M:SS timestamp
+    """
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(seconds, 60)
+    if hours >= 1:
+        return f"{int(hours)}:{int(minutes):02d}:{secs:05.2f}"
+    return f"{int(minutes)}:{secs:05.2f}"
 
 
 def run_epoch(model, loader, device, criterion, optimizer=None):
@@ -58,6 +71,7 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     # Remember to only adjust one value at a time across retrains to be able to track how they affect the overall training.
     # Only adjust values after referring to the confusion matrix and model loss chart of the last training session.
 
+    training_start = time.perf_counter()
     os.makedirs("outputs", exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #checks to see if the gpu is available for training otherwise run on the cpu.
     print(f"Using device: {device}")
@@ -75,22 +89,27 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
 
-    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
+    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [], "epoch_seconds": []}
     best_val_loss = float("inf")
     epochs_without_improvement = 0
 
     for epoch in range(epochs):
+        epoch_start = time.perf_counter()
         train_loss, train_acc = run_epoch(model, train_loader, device, criterion, optimizer)
         val_loss, val_acc = run_epoch(model, val_loader, device, criterion, optimizer=None)
+
+        epoch_seconds = time.perf_counter() - epoch_start
 
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
+        history["epoch_seconds"].append(epoch_seconds)
 
         print(f"Epoch {epoch+1}/{epochs}  "
               f"train_loss={train_loss:.4f} train_acc={train_acc:.2%}  "
-              f"val_loss={val_loss:.4f} val_acc={val_acc:.2%}")
+              f"val_loss={val_loss:.4f} val_acc={val_acc:.2%}"
+              f"({epoch_seconds:1f}s)")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -108,6 +127,23 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     with open("outputs/classes.txt", "w") as f:
         f.write("\n".join(classes))
 
+    total_seconds = time.perf_counter() - training_start
+    epochs_run = len(history["epoch_seconds"])
+    avg_epoch_seconds = sum(history["epoch_seconds"]) / epochs_run
+
+    print(f"\nTotal training time: {format_duration(total_seconds)}  "
+          f"({epochs_run} epochs, avg {avg_epoch_seconds:.1f}s/epoch)")
+
+    with open("outputs/training_duration.txt", "w") as f:
+        f.write(f"device: {device}\n")
+        f.write(f"epochs_run: {epochs_run}\n")
+        f.write(f"total_seconds: {total_seconds:.2f}\n")
+        f.write(f"total_duration: {format_duration(total_seconds)}\n")
+        f.write(f"avg_seconds_per_epoch: {avg_epoch_seconds:.2f}\n")
+        f.write(f"n_train_images: {n_train}\n")
+        f.write(f"n_val_images: {n_val}\n")
+    print("Saved outputs/training_duration.txt")
+
     plot_history(history)
     plot_confusion_matrix(model, val_loader, device, classes)
     return model, history
@@ -119,7 +155,7 @@ def plot_history(history):
     is progressing across the epochs. This will also help us with adjusting the various
     parameters of the model as it trains (e.g. number of epochs, learning rate etc.)
     """
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    fig, (ax1, ax2, ax3) = plt.subplots(3,1, figsize=(10,11))
 
     ax1.plot(history["train_loss"], label="Training Loss")
     ax1.plot(history["val_loss"], label="Validation Loss")
@@ -138,6 +174,13 @@ def plot_history(history):
     ax2.legend()
     ax2.grid(True)
 
+    ax3.plot(history["epoch_seconds"], label="Seconds per Epoch", color="purple")
+    ax3.set_title("Epoch Duration") #useful for spotting slowdowns across a training session
+    ax3.set_xlabel("Epoch")
+    ax3.set_ylabel("Seconds")
+    ax3.legend()
+    ax3.grid(True)
+
     plt.tight_layout()
     plt.savefig("outputs/training_history.png", dpi=120)
     print("Saved outputs/training_history.png")
@@ -145,8 +188,8 @@ def plot_history(history):
 
 def plot_confusion_matrix(model, val_loader, device, classes):
     """
-    We need to be able to evaluate the trained model before we can begin testing
-    the inference, so an easy way is to generate a confusion matrix of the model
+    To evaluate the trained model before we can begin testing
+    the inference, an easy way is to generate a confusion matrix of the model
     after it has completed training, this will allow us to view how the model is
     handling the different classes.
     """
