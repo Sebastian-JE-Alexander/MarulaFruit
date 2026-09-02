@@ -1,13 +1,13 @@
 """
 -------------------------- config.py ---------------------------------------
-Shared constants for the good vs missing_open_eyelid prototype.
+Shared constants for the good vs bad shell prototype.
 
-the current code is general so that any future classes can be added
+the current code is generalized so that any future classes can be added
 without changes.
-add a third class by creating dataset_images/train/<new_class>/ and
-dataset_images/validation/<new_class>/ folders - ImageFolder (used in
-dataset_images.py) infers classes from folder names automatically, and the
-model's output layer size is driven by len(CLASS_NAMES) here, not hardcoded.
+Add a third class by creating dataset_images/train/<new_class>/ and
+dataset_images/validation/<new_class>/ folders. The ImageFolder function (used in
+dataset_images.py) pulls classes from folder names automatically, and the
+model's output layer size is controlled by len(CLASS_NAMES) here
 -------------------------------------------------------------------------------
 """
 

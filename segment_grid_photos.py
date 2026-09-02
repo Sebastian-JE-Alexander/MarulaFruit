@@ -16,6 +16,10 @@ train/validation - same physical-shell-leakage reasoning as before: if
 any photos are reshuffled/rephotographed shots of the same physical
 shells, keeping whole photos on one side of the split guarantees no
 crossover between validation and training images.
+
+To run a test segementation to see how your images came out, run this command in the terminal:
+
+python segment_grid_photos.py --input_dir test --class_name segmentation_check
 --------------------------------------------------------------------------------------------
 """
 

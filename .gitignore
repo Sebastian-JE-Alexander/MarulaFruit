@@ -20,3 +20,6 @@ outputs/
 *.pt
 *.pth
 Missing_Open_Eyes/
+
+/test/
+/monotest.py

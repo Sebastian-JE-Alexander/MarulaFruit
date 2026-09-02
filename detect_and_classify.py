@@ -28,10 +28,10 @@ from segment_grid_photos import find_blobs, crop_shell
 COLOURS = {
     # BGR - extend this if you add more classes later; unlisted classes
     # fall back to white so nothing silently fails to draw
-    "good": (0, 200, 0),
+    "good": (0, 255, 0),
     "missing_open_eyelid": (0, 0, 255),
 }
-DEFAULT_COLOUR = (255, 255, 255)
+DEFAULT_COLOUR = (0, 255, 0)
 
 
 def load_model(weights_path="outputs/shell_classifier.pt",
