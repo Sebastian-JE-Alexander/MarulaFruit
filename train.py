@@ -61,13 +61,13 @@ def run_epoch(model, loader, device, criterion, optimizer=None):
 
 
 def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
-         epochs=30, lr=1e-3, weight_decay=1e-4, patience=8):
+         epochs=100, lr=1e-3, weight_decay=1e-4, patience=20):
 
     # Model Training parameters:
-    # 1) Epochs = 30
+    # 1) Epochs = 30, upped to 100 to test new data batch
     # 2) Learning rate = 1e-3
     # 3) weight decay = 1e-4
-    # 5) patience = 8
+    # 5) patience = 8, upped to 20 to accommodate new epoch cap.
     # Remember to only adjust one value at a time across retrains to be able to track how they affect the overall training.
     # Only adjust values after referring to the confusion matrix and model loss chart of the last training session.
 

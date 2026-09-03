@@ -19,7 +19,8 @@ crossover between validation and training images.
 
 To run a test segementation to see how your images came out, run this command in the terminal:
 
-python segment_grid_photos.py --input_dir test --class_name segmentation_check
+python segment_grid_photos.py --input_dir raw_imgs/train/good --val_input_dir raw_imgs/validation/good --class_name good
+python segment_grid_photos.py --input_dir raw_imgs/train/bad --val_input_dir raw_imgs/validation/bad --class_name bad
 --------------------------------------------------------------------------------------------
 """
 
