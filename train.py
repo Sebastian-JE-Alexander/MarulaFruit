@@ -9,9 +9,11 @@ Usage: python train.py
 -----------------------------------------------------------------------
 """
 
+import csv
 import os
 import random
 import time
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -108,6 +110,69 @@ def compute_class_weights(train_dir, classes):
     weights = counts.sum() / (len(counts) * counts)  # inverse frequency, normalised
     return weights
 
+def compute_binary_metrics(cm, classes):
+    """
+
+    """
+    if len(classes) != 2:
+        return None
+    tn, fp, fn, tp = cm.ravel()
+    negative_class, positive_class = classes[0], classes[1]
+    return {
+        "positive_class": positive_class,
+        "negative_class": negative_class,
+        "accuracy": (tp + tn) / (tp + tn + fp + fn),
+        "recall": tp / (tp + fn) if (tp + fn) else float("nan"),
+        "specificity": tn / (tn + fp) if (tn + fp) else float("nan"),
+        "precision": tp / (tp + fp) if (tp + fp) else float("nan"),
+        "npv": tn / (tn + fn) if (tn + fn) else float("nan"),
+        "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn),
+    }
+
+
+def log_training_run(log_path="outputs/training_log.csv", **kwargs):
+    """
+
+    """
+    metrics = kwargs.get("metrics", None)
+    class_weights = kwargs.get("class_weights", None)
+    classes = kwargs.get("classes", None)
+
+    row = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "device": str(kwargs["device"]),
+        "classes": "|".join(classes),
+        "n_train": kwargs["n_train"],
+        "n_val": kwargs["n_val"],
+        "epochs_requested": kwargs["epochs_requested"],
+        "epochs_run": kwargs["epochs_run"],
+        "total_duration": format_duration(kwargs["total_seconds"]),
+        "avg_seconds_per_epoch": round(kwargs["avg_epoch_seconds"], 2),
+        "lr": kwargs["lr"],
+        "weight_decay": kwargs["weight_decay"],
+        "patience": kwargs["patience"],
+        "class_weights": "|".join(
+            f"{c}={w:.3f}" for c, w in zip(classes, class_weights.tolist())),
+        "best_val_loss": round(kwargs["best_val_loss"], 5),
+        # kept present (blank if unavailable) on every row, rather than
+        # only appearing sometimes, so the CSV's columns never shift
+        # between runs regardless of how many classes a given run had
+        "accuracy": round(metrics["accuracy"], 4) if metrics else "",
+        "recall": round(metrics["recall"], 4) if metrics else "",
+        "specificity": round(metrics["specificity"], 4) if metrics else "",
+        "precision": round(metrics["precision"], 4) if metrics else "",
+        "npv": round(metrics["npv"], 4) if metrics else "",
+        "positive_class": metrics["positive_class"] if metrics else "",
+    }
+
+    file_exists = os.path.exists(log_path)
+    with open(log_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+    print(f"Appended this run to {log_path}")
+
 
 def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
          epochs=30, lr=1e-3, weight_decay=1e-4, patience=8):
@@ -192,7 +257,15 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     print("Saved outputs/training_duration.txt")
 
     plot_history(history)
-    plot_confusion_matrix(model, val_loader, device, classes)
+    metrics = plot_confusion_matrix(model, val_loader, device, classes)
+    log_training_run(
+        device=device, classes=classes, n_train=n_train, n_val=n_val,
+        epochs_requested=epochs, epochs_run=epochs_run,
+        total_seconds=total_seconds, avg_epoch_seconds=avg_epoch_seconds,
+        lr=lr, weight_decay=weight_decay, patience=patience,
+        class_weights=class_weights, best_val_loss=best_val_loss,
+        metrics=metrics,
+    )
     return model, history
 
 
@@ -229,7 +302,6 @@ def plot_history(history):
 
 
 def plot_confusion_matrix(model, val_loader, device, classes):
-    global ax_metrics
     model.eval()
     y_true, y_pred = [], []
     with torch.no_grad():
@@ -244,13 +316,14 @@ def plot_confusion_matrix(model, val_loader, device, classes):
     print(classification_report(y_true, y_pred, target_names=classes, zero_division=0))
 
     cm = confusion_matrix(y_true, y_pred)
+    metrics = compute_binary_metrics(cm, classes)
 
     # Metrics panel only makes unambiguous sense for exactly 2 classes -
     # TP/TN/FP/FN don't have one clean meaning once a 3rd+ class exists
     # (that needs one-vs-rest per class instead). Skip it automatically
     # if this project grows past good/bad, rather than showing something
     # misleading.
-    show_metrics = len(classes) == 2
+    show_metrics = metrics is not None
 
     if show_metrics:
         fig, (ax_cm, ax_metrics) = plt.subplots(
@@ -259,41 +332,29 @@ def plot_confusion_matrix(model, val_loader, device, classes):
         fig, ax_cm = plt.subplots(figsize=(6, 5))
 
     sns.heatmap(cm, annot=True, fmt="d", xticklabels=classes, yticklabels=classes,
-                cmap="plasma", ax=ax_cm)
+                cmap="Blues", ax=ax_cm)
     ax_cm.set_title("Confusion Matrix (Validation Set)")
     ax_cm.set_xlabel("Predicted")
     ax_cm.set_ylabel("True")
 
     if show_metrics:
-        # sklearn's confusion_matrix sorts labels alphabetically, so for
-        # classes=['bad','good'] this ravels to [TN, FP, FN, TP] with
-        # 'good' (classes[1]) as the positive class - matching how these
-        # were calculated by hand.
-        tn, fp, fn, tp = cm.ravel()
-        negative_class, positive_class = classes[0], classes[1]
-
-        accuracy = (tp + tn) / (tp + tn + fp + fn)
-        recall = tp / (tp + fn) if (tp + fn) else float("nan")
-        specificity = tn / (tn + fp) if (tn + fp) else float("nan")
-        precision = tp / (tp + fp) if (tp + fp) else float("nan")
-        npv = tn / (tn + fn) if (tn + fn) else float("nan")
-
+        positive_class, negative_class = metrics["positive_class"], metrics["negative_class"]
         metrics_text = (
             f"Positive class: '{positive_class}'\n"
             f"Negative class: '{negative_class}'\n"
             f"\n"
-            f"Accuracy:     {accuracy:.1%}\n"
+            f"Accuracy:     {metrics['accuracy']:.1%}\n"
             f"\n"
-            f"Recall (Sens.): {recall:.1%}\n"
+            f"Recall (Sens.): {metrics['recall']:.1%}\n"
             f"  real '{positive_class}' caught\n"
             f"\n"
-            f"Specificity:  {specificity:.1%}\n"
+            f"Specificity:  {metrics['specificity']:.1%}\n"
             f"  real '{negative_class}' caught\n"
             f"\n"
-            f"Precision:    {precision:.1%}\n"
+            f"Precision:    {metrics['precision']:.1%}\n"
             f"  predicted '{positive_class}' correct\n"
             f"\n"
-            f"NPV:          {npv:.1%}\n"
+            f"NPV:          {metrics['npv']:.1%}\n"
             f"  predicted '{negative_class}' correct"
         )
         ax_metrics.axis("off")
@@ -304,6 +365,7 @@ def plot_confusion_matrix(model, val_loader, device, classes):
     plt.tight_layout()
     plt.savefig("outputs/confusion_matrix.png", dpi=120)
     print("Saved outputs/confusion_matrix.png")
+    return metrics
 
 
 if __name__ == "__main__":
