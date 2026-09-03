@@ -11,7 +11,7 @@ NOTE: When specifying colours for classes in the dict, remember that OpenCv uses
       BGR order not the standard RGB.
 
 
-Usage: python detect_and_classify.py path/to/image.png [--output path/to/annotated.png]
+Usage: python detect_and_classify.py path/to/image.png
 ------------------------------------------------------------------------------------------
 """
 

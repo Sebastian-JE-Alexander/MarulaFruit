@@ -5,6 +5,7 @@ accuracy per epoch for both train and validation.
 After training, evaluates on the validation set and plots a confusion
 matrix.
 
+Usage: python train.py
 -----------------------------------------------------------------------
 """
 
@@ -76,8 +77,8 @@ def run_epoch(model, loader, device, criterion, optimizer=None):
     return total_loss / total, correct / total
 
 
-def main(train_dir="dataset/train", val_dir="dataset/validation",
-         epochs=30, lr=1e-3, weight_decay=1e-4, patience=8):
+def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
+         epochs=100, lr=1e-3, weight_decay=1e-4, patience=20):
     training_start = time.perf_counter()
     set_seed()
     os.makedirs("outputs", exist_ok=True)
@@ -88,7 +89,7 @@ def main(train_dir="dataset/train", val_dir="dataset/validation",
     val_loader, n_val, val_classes = make_loader(val_dir, augment=False, shuffle=False)
     assert classes == val_classes, (
         f"Train classes {classes} don't match validation classes {val_classes} - "
-        f"check both dataset/train/ and dataset/validation/ have the same subfolders."
+        f"check both dataset_images/train/ and dataset_images/validation/ have the same subfolders."
     )
     print(f"Classes: {classes}")
     print(f"{n_train} training images, {n_val} validation images")
