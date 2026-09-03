@@ -23,11 +23,14 @@ import numpy as np
 from model import ShellClassifier
 from dataset import make_loader
 
+global ax_metrics
+
 SEED = 42
 
 
 def set_seed(seed=SEED):
-    """Fixes random weight initialization and data shuffling order, so
+    """
+    Fixes random weight initialization and data shuffling order, so
     runs are reproducible and can be fairly compared - without this,
     every run gets a different random starting point, and a genuinely
     unlucky one can cause a 'dead network' (e.g. every ReLU unit stuck
@@ -44,7 +47,9 @@ def set_seed(seed=SEED):
 
 
 def format_duration(seconds):
-    """H:MM:SS for anything over an hour, otherwise M:SS - readable either way."""
+    """
+    H:MM:SS for anything over an hour, otherwise M:SS.
+    """
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
     if hours >= 1:
@@ -53,7 +58,9 @@ def format_duration(seconds):
 
 
 def run_epoch(model, loader, device, criterion, optimizer=None):
-    """optimizer=None -> eval mode, no gradient step. Returns (loss, accuracy)."""
+    """
+    optimizer=None -> eval mode, no gradient step. Returns (loss, accuracy).
+    """
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
 
@@ -77,8 +84,33 @@ def run_epoch(model, loader, device, criterion, optimizer=None):
     return total_loss / total, correct / total
 
 
-def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
-         epochs=100, lr=1e-3, weight_decay=1e-4, patience=20):
+def compute_class_weights(train_dir, classes):
+    """
+    Inverse-frequency class weights, so CrossEntropyLoss can't take
+    the shortcut of leaning toward whichever class has more images.
+    Necessary as soon as classes stop being roughly equal in count -
+    e.g. if you keep photographing new good shells (real diversity gain)
+    while bad stays capped by reshuffling the same limited physical
+    stock (no real diversity gain, just more images of it), good will
+    naturally pull ahead in raw count. That's fine and worth doing
+    anyway - this weighting is what stops the count difference itself
+    from biasing the model, so you don't have to hold back on
+    photographing new good shells just to keep the numbers looking even.
+    """
+    counts = []
+    for cls in classes:
+        folder = os.path.join(train_dir, cls)
+        n = len([f for f in os.listdir(folder)
+                 if f.lower().endswith((".png", ".jpg", ".jpeg"))])
+        counts.append(n)
+
+    counts = torch.tensor(counts, dtype=torch.float32)
+    weights = counts.sum() / (len(counts) * counts)  # inverse frequency, normalised
+    return weights
+
+
+def main(train_dir="dataset/train", val_dir="dataset/validation",
+         epochs=30, lr=1e-3, weight_decay=1e-4, patience=8):
     training_start = time.perf_counter()
     set_seed()
     os.makedirs("outputs", exist_ok=True)
@@ -89,14 +121,18 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     val_loader, n_val, val_classes = make_loader(val_dir, augment=False, shuffle=False)
     assert classes == val_classes, (
         f"Train classes {classes} don't match validation classes {val_classes} - "
-        f"check both dataset_images/train/ and dataset_images/validation/ have the same subfolders."
+        f"check both dataset/train/ and dataset/validation/ have the same subfolders."
     )
     print(f"Classes: {classes}")
     print(f"{n_train} training images, {n_val} validation images")
 
+    class_weights = compute_class_weights(train_dir, classes)
+    print(f"Class weights (inverse frequency): "
+          f"{dict(zip(classes, [round(w, 3) for w in class_weights.tolist()]))}")
+
     model = ShellClassifier(img_size=128, num_classes=len(classes)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
 
     history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [],
                "epoch_seconds": []}
@@ -193,6 +229,7 @@ def plot_history(history):
 
 
 def plot_confusion_matrix(model, val_loader, device, classes):
+    global ax_metrics
     model.eval()
     y_true, y_pred = [], []
     with torch.no_grad():
