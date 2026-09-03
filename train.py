@@ -135,7 +135,10 @@ def compute_binary_metrics(cm, classes):
 
 def log_training_run(log_path="outputs/training_log.csv", **kwargs):
     """
-
+    Appends one row summarising this run to a persistent .csv, so
+    results across training sessions accumulate in one place you
+    can open in Excel. Creates the file with a header on the first-ever run;
+    every run afterwards appends a new row.
     """
     metrics = kwargs.get("metrics", None)
     class_weights = kwargs.get("class_weights", None)
