@@ -32,19 +32,19 @@ class ShellClassifier(nn.Module):
         super().__init__()
 
         self.features = nn.Sequential(
-            nn.Conv2d(1,16,kernel_size=3,padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.MaxPool2d(2),  # 128 -> 64
             nn.Dropout(0.2),
 
-            nn.Conv2d(16,32, kernel_size=3,padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.MaxPool2d(2),  # 64 -> 32
             nn.Dropout(0.25),
 
-            nn.Conv2d(32,64,kernel_size=3,padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.MaxPool2d(2),  # 32 -> 16
             nn.Dropout(0.25),
         )
 
@@ -52,17 +52,18 @@ class ShellClassifier(nn.Module):
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(flat_size, 128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.25),
-            nn.Linear(128, num_classes),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(128, num_classes),  # raw logits - CrossEntropyLoss applies softmax internally
         )
+
     def forward(self, x):
         x = self.features(x)
         return self.classifier(x)
 
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     from torchinfo import summary
+
     model = ShellClassifier(img_size=128, num_classes=2)
     summary(model, input_size=(1, 1, 128, 128))

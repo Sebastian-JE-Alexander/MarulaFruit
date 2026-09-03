@@ -9,6 +9,7 @@ matrix.
 """
 
 import os
+import random
 import time
 
 import torch
@@ -21,22 +22,37 @@ import numpy as np
 from model import ShellClassifier
 from dataset import make_loader
 
+SEED = 42
+
+
+def set_seed(seed=SEED):
+    """Fixes random weight initialization and data shuffling order, so
+    runs are reproducible and can be fairly compared - without this,
+    every run gets a different random starting point, and a genuinely
+    unlucky one can cause a 'dead network' (e.g. every ReLU unit stuck
+    outputting zero from the first epoch, permanently killing its own
+    gradient) that looks like a training failure but is actually just
+    bad luck on initialization, indistinguishable from a real problem
+    without a fixed seed to isolate what actually changed between runs.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
 
 def format_duration(seconds):
-    """
-    HH:MM:SS for anything over an hour, otherwise M:SS timestamp
-    """
+    """H:MM:SS for anything over an hour, otherwise M:SS - readable either way."""
     hours, rem = divmod(seconds, 3600)
-    minutes, secs = divmod(seconds, 60)
+    minutes, secs = divmod(rem, 60)
     if hours >= 1:
         return f"{int(hours)}:{int(minutes):02d}:{secs:05.2f}"
     return f"{int(minutes)}:{secs:05.2f}"
 
 
 def run_epoch(model, loader, device, criterion, optimizer=None):
-    """
-    optimizer=None -> eval mode, no gradient step. Returns (loss, accuracy).
-    """
+    """optimizer=None -> eval mode, no gradient step. Returns (loss, accuracy)."""
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
 
@@ -60,27 +76,19 @@ def run_epoch(model, loader, device, criterion, optimizer=None):
     return total_loss / total, correct / total
 
 
-def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
-         epochs=100, lr=1e-3, weight_decay=1e-4, patience=20):
-
-    # Model Training parameters:
-    # 1) Epochs = 30, upped to 100 to test new data batch
-    # 2) Learning rate = 1e-3
-    # 3) weight decay = 1e-4
-    # 5) patience = 8, upped to 20 to accommodate new epoch cap.
-    # Remember to only adjust one value at a time across retrains to be able to track how they affect the overall training.
-    # Only adjust values after referring to the confusion matrix and model loss chart of the last training session.
-
+def main(train_dir="dataset/train", val_dir="dataset/validation",
+         epochs=30, lr=1e-3, weight_decay=1e-4, patience=8):
     training_start = time.perf_counter()
+    set_seed()
     os.makedirs("outputs", exist_ok=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #checks to see if the gpu is available for training otherwise run on the cpu.
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     train_loader, n_train, classes = make_loader(train_dir, augment=True)
     val_loader, n_val, val_classes = make_loader(val_dir, augment=False, shuffle=False)
     assert classes == val_classes, (
         f"Train classes {classes} don't match validation classes {val_classes} - "
-        f"check both dataset_images/train/ and dataset_images/validation/ have the same subfolders."
+        f"check both dataset/train/ and dataset/validation/ have the same subfolders."
     )
     print(f"Classes: {classes}")
     print(f"{n_train} training images, {n_val} validation images")
@@ -89,12 +97,14 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
 
-    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [], "epoch_seconds": []}
+    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [],
+               "epoch_seconds": []}
     best_val_loss = float("inf")
     epochs_without_improvement = 0
 
     for epoch in range(epochs):
         epoch_start = time.perf_counter()
+
         train_loss, train_acc = run_epoch(model, train_loader, device, criterion, optimizer)
         val_loss, val_acc = run_epoch(model, val_loader, device, criterion, optimizer=None)
 
@@ -106,10 +116,10 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
         history["val_acc"].append(val_acc)
         history["epoch_seconds"].append(epoch_seconds)
 
-        print(f"Epoch {epoch+1}/{epochs}  "
+        print(f"Epoch {epoch + 1}/{epochs}  "
               f"train_loss={train_loss:.4f} train_acc={train_acc:.2%}  "
-              f"val_loss={val_loss:.4f} val_acc={val_acc:.2%}"
-              f"({epoch_seconds:1f}s)")
+              f"val_loss={val_loss:.4f} val_acc={val_acc:.2%}  "
+              f"({epoch_seconds:.1f}s)")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -118,7 +128,7 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= patience:
-                print(f"Early stopping at epoch {epoch+1} (no improvement for {patience} epochs)") #implemented early stopping routine to end training when no improvement is seen
+                print(f"Early stopping at epoch {epoch + 1} (no improvement for {patience} epochs)")
                 break
 
     # reload best checkpoint (mirrors Keras EarlyStopping's restore_best_weights)
@@ -150,12 +160,7 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
 
 
 def plot_history(history):
-    """
-    We need to be able to plot the training history so that we can see how the model
-    is progressing across the epochs. This will also help us with adjusting the various
-    parameters of the model as it trains (e.g. number of epochs, learning rate etc.)
-    """
-    fig, (ax1, ax2, ax3) = plt.subplots(3,1, figsize=(10,11))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 11))
 
     ax1.plot(history["train_loss"], label="Training Loss")
     ax1.plot(history["val_loss"], label="Validation Loss")
@@ -175,7 +180,7 @@ def plot_history(history):
     ax2.grid(True)
 
     ax3.plot(history["epoch_seconds"], label="Seconds per Epoch", color="purple")
-    ax3.set_title("Epoch Duration") #useful for spotting slowdowns across a training session
+    ax3.set_title("Epoch Duration (useful for spotting slowdowns across a session)")
     ax3.set_xlabel("Epoch")
     ax3.set_ylabel("Seconds")
     ax3.legend()
@@ -216,7 +221,7 @@ def plot_confusion_matrix(model, val_loader, device, classes):
         fig, ax_cm = plt.subplots(figsize=(6, 5))
 
     sns.heatmap(cm, annot=True, fmt="d", xticklabels=classes, yticklabels=classes,
-                cmap="Blues", ax=ax_cm)
+                cmap="plasma", ax=ax_cm)
     ax_cm.set_title("Confusion Matrix (Validation Set)")
     ax_cm.set_xlabel("Predicted")
     ax_cm.set_ylabel("True")
@@ -255,8 +260,8 @@ def plot_confusion_matrix(model, val_loader, device, classes):
         )
         ax_metrics.axis("off")
         ax_metrics.text(0.02, 0.98, metrics_text, transform=ax_metrics.transAxes,
-                         fontsize=10, verticalalignment="top", family="monospace",
-                         bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray"))
+                        fontsize=10, verticalalignment="top", family="monospace",
+                        bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray"))
 
     plt.tight_layout()
     plt.savefig("outputs/confusion_matrix.png", dpi=120)
