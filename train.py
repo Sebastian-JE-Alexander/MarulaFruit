@@ -187,12 +187,6 @@ def plot_history(history):
 
 
 def plot_confusion_matrix(model, val_loader, device, classes):
-    """
-    To evaluate the trained model before we can begin testing
-    the inference, an easy way is to generate a confusion matrix of the model
-    after it has completed training, this will allow us to view how the model is
-    handling the different classes.
-    """
     model.eval()
     y_true, y_pred = [], []
     with torch.no_grad():
@@ -207,12 +201,63 @@ def plot_confusion_matrix(model, val_loader, device, classes):
     print(classification_report(y_true, y_pred, target_names=classes, zero_division=0))
 
     cm = confusion_matrix(y_true, y_pred)
-    plt.figure(figsize=(6, 5))
+
+    # Metrics panel only makes unambiguous sense for exactly 2 classes -
+    # TP/TN/FP/FN don't have one clean meaning once a 3rd+ class exists
+    # (that needs one-vs-rest per class instead). Skip it automatically
+    # if this project grows past good/bad, rather than showing something
+    # misleading.
+    show_metrics = len(classes) == 2
+
+    if show_metrics:
+        fig, (ax_cm, ax_metrics) = plt.subplots(
+            1, 2, figsize=(10, 5), gridspec_kw={"width_ratios": [3, 2]})
+    else:
+        fig, ax_cm = plt.subplots(figsize=(6, 5))
+
     sns.heatmap(cm, annot=True, fmt="d", xticklabels=classes, yticklabels=classes,
-                cmap="Blues")
-    plt.title("Confusion Matrix (Validation Set)")
-    plt.xlabel("Predicted")
-    plt.ylabel("True")
+                cmap="Blues", ax=ax_cm)
+    ax_cm.set_title("Confusion Matrix (Validation Set)")
+    ax_cm.set_xlabel("Predicted")
+    ax_cm.set_ylabel("True")
+
+    if show_metrics:
+        # sklearn's confusion_matrix sorts labels alphabetically, so for
+        # classes=['bad','good'] this ravels to [TN, FP, FN, TP] with
+        # 'good' (classes[1]) as the positive class - matching how these
+        # were calculated by hand.
+        tn, fp, fn, tp = cm.ravel()
+        negative_class, positive_class = classes[0], classes[1]
+
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        recall = tp / (tp + fn) if (tp + fn) else float("nan")
+        specificity = tn / (tn + fp) if (tn + fp) else float("nan")
+        precision = tp / (tp + fp) if (tp + fp) else float("nan")
+        npv = tn / (tn + fn) if (tn + fn) else float("nan")
+
+        metrics_text = (
+            f"Positive class: '{positive_class}'\n"
+            f"Negative class: '{negative_class}'\n"
+            f"\n"
+            f"Accuracy:     {accuracy:.1%}\n"
+            f"\n"
+            f"Recall (Sens.): {recall:.1%}\n"
+            f"  real '{positive_class}' caught\n"
+            f"\n"
+            f"Specificity:  {specificity:.1%}\n"
+            f"  real '{negative_class}' caught\n"
+            f"\n"
+            f"Precision:    {precision:.1%}\n"
+            f"  predicted '{positive_class}' correct\n"
+            f"\n"
+            f"NPV:          {npv:.1%}\n"
+            f"  predicted '{negative_class}' correct"
+        )
+        ax_metrics.axis("off")
+        ax_metrics.text(0.02, 0.98, metrics_text, transform=ax_metrics.transAxes,
+                         fontsize=10, verticalalignment="top", family="monospace",
+                         bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray"))
+
     plt.tight_layout()
     plt.savefig("outputs/confusion_matrix.png", dpi=120)
     print("Saved outputs/confusion_matrix.png")
