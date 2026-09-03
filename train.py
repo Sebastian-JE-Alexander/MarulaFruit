@@ -112,7 +112,10 @@ def compute_class_weights(train_dir, classes):
 
 def compute_binary_metrics(cm, classes):
     """
-
+    Returns None if classes isn't exactly length 2 - TP/TN/FP/FN
+    doesn't have one clean meaning past binary classification. Extracted
+    as its own function so both the confusion matrix AND logger can use
+    the same numbers without computing them twice.
     """
     if len(classes) != 2:
         return None
