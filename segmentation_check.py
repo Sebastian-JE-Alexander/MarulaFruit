@@ -5,6 +5,12 @@ diagnostics. It doesn't assume the 9x9 grid we used for segment_grid_photos.py a
 into dataset_images.
 
 For each image in the input folder:
+  - Draws every detected box on a copy of the frame (green = normal,
+    orange = flagged as a size outlier within that same frame) and
+    saves it for a quick visual scan
+  - Reports blob count and size spread per frame
+
+Usage: python segmentation_check.py path/to/test_frames_folder
 
 """
 
