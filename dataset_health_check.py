@@ -25,7 +25,7 @@ import cv2
 import numpy as np
 
 TRAIN_DIR = "dataset_images/train"
-TEST_DIR = "dataset_images/validation"
+VAL_DIR = "dataset_images/validation"
 VALID_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp"]
 
 def list_images(folder):
@@ -158,6 +158,7 @@ def check_file_integrity(train_dir, val_dir):
         print(f"\n  All images are genuinely grayscale (R=G=B) - "
               f"consistent with a Mono8 camera source.")
 
+
 def check_duplicates_across_split(train_dir, val_dir):
     print("\n" + "=" * 64)
     print("EXACT DUPLICATE FILES ACROSS TRAIN/VALIDATION")
@@ -167,13 +168,12 @@ def check_duplicates_across_split(train_dir, val_dir):
           "  shell - those differ pixel-for-pixel - that risk still needs\n"
           "  the physically-separate-before-reshuffling discipline.)\n")
 
-    train_hashes = []
+    train_hashes = {}
     for cls in (os.listdir(train_dir) if os.path.isdir(train_dir) else []):
         cls_dir = os.path.join(train_dir, cls)
         if os.path.isdir(cls_dir):
-            for os.path.isdir(cls_dir):
-                for path in list_images(cls_dir):
-                    train_hashes[file_hash(path)] = path
+            for path in list_images(cls_dir):
+                train_hashes[file_hash(path)] = path
 
     duplicates = []
     for cls in (os.listdir(val_dir) if os.path.isdir(val_dir) else []):
@@ -185,14 +185,29 @@ def check_duplicates_across_split(train_dir, val_dir):
                     duplicates.append((train_hashes[h], path))
 
     if duplicates:
-        print(f" Found {len(duplicates)} exact duplicates.")
+        print(f"  Found {len(duplicates)} exact duplicate(s):")
         for train_path, val_path in duplicates:
-            print(f"   {train_path}\n    == {val_path}")
-        else:
-            print(f" No exact duplicate files found between train and validation.")
+            print(f"    {train_path}\n      == {val_path}")
+    else:
+        print("  No exact duplicate files found between train and validation.")
+
 
 def main():
-    print("Dataset Health Check")
+    print("DATASET HEALTH CHECK")
+    print(f"Train dir:      {TRAIN_DIR}")
+    print(f"Validation dir: {VAL_DIR}\n")
+
+    check_class_counts(TRAIN_DIR, VAL_DIR)
+    check_file_integrity(TRAIN_DIR, VAL_DIR)
+    check_duplicates_across_split(TRAIN_DIR, VAL_DIR)
+
+    print("\n" + "=" * 64)
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 
