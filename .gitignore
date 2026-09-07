@@ -16,9 +16,9 @@ Thumbs.db
 
 # --- Common data/output folders (uncomment/add as needed) ---
 dataset_images/
-outputs/
-*.pt
-*.pth
+
+
+
 Missing_Open_Eyes/
 
 /test/

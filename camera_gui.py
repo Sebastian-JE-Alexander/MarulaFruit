@@ -37,7 +37,7 @@ from CameraParams_header import *
 
 from detect_and_classify import load_model, process_frame
 
-EXPOSURE_VAL = 40000.0  # matches cameras.py - adjust to your lighting
+EXPOSURE_VAL = 172025.0  # matches cameras.py - adjust to your lighting
 
 # Update to match the two cameras' actual configured UserDefinedName
 # (set via the MVS client software).
