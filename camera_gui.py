@@ -18,9 +18,8 @@ from PIL import Image, ImageTk
 
 # 'Sources Root' in PyCharm only affects imports when a run is launched
 # through PyCharm's own Run/Debug button - it does NOT automatically
-# apply to a plain terminal session (even PyCharm's integrated one,
-# depending on a separate setting). Adding MvImport to sys.path
-# directly here means the import below works regardless of how this
+# apply to a terminal session (even PyCharm's integrated one).
+# Adding MvImport to sys.path directly here means the import below works regardless of how this
 # script is actually launched.
 MVIMPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MvImport")
 if MVIMPORT_DIR not in sys.path:
@@ -37,7 +36,7 @@ EXPOSURE_VAL = 40000.0  # matches cameras.py - adjust to your lighting
 
 class CameraController:
     """
-    Single-camera connect/trigger/grab/disconnect
+    Single-camera connect/trigger/grab/disconnect built on the MVS SDK.
     """
 
     def __init__(self, exposure=EXPOSURE_VAL):
@@ -53,7 +52,6 @@ class CameraController:
             raise RuntimeError("No GigE cameras found - check power/network connection")
 
         # First camera found - extend to loop over device_list.nDeviceNum
-        # like cameras.py does once more than one camera is involved
         st_device = cast(device_list.pDeviceInfo[0], POINTER(MV_CC_DEVICE_INFO)).contents
 
         cam = MvCamera()
@@ -65,14 +63,14 @@ class CameraController:
         if ret != 0:
             raise RuntimeError(f"Open device failed, ret [0x{ret:x}]")
 
-        # --- Trigger config: SOFTWARE for this benchtop GUI ---
-        # For the real belt integration, switch these two lines back to
-        # hardware-trigger config instead:
+        # --- Trigger config: SOFTWARE setup for the GUI ---
+        # For the real integration, might need to switch these two lines back to
+        # hardware-trigger config instead depending on setup:
         #   cam.MV_CC_SetEnumValue("TriggerSource", 0)   # Line0
         #   cam.MV_CC_SetEnumValue("TriggerActivation", 0)  # rising edge
         cam.MV_CC_SetEnumValue("TriggerMode", 1)  # 1 = trigger mode on (not free-run)
         cam.MV_CC_SetEnumValue("TriggerSource", 7)  # 7 = Software on most Hikrobot models -
-        # CONFIRM against your camera's node viewer
+        # Make sure to confirm these with the actual camera model
         cam.MV_CC_SetFloatValue("ExposureTime", self.exposure)
 
         ret = cam.MV_CC_StartGrabbing()
@@ -85,7 +83,7 @@ class CameraController:
         """
         Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel).
+        expects. Assumes Mono8 (1 byte/pixel), check with monotest.py
         """
         if self.cam is None:
             raise RuntimeError("Camera not connected")
@@ -137,7 +135,7 @@ class ShellSorterGUI:
         # Label width/height in CHARACTER units while showing text, but
         # in PIXELS once only an image is displayed - setting a fixed
         # width/height at creation time (meant to size the text
-        # placeholder reasonably) silently collapsed the box to a tiny
+        # placeholder reasonably) collapsed the box to a tiny
         # ~60x20 PIXEL box the moment an image replaced the text,
         # regardless of the image's actual size or any thumbnail
         # resizing. Letting the Label auto-size to its actual content

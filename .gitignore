@@ -22,6 +22,6 @@ outputs/
 Missing_Open_Eyes/
 
 /test/
-/monotest.py
+
 /raw_imgs/
 /classify-test/
