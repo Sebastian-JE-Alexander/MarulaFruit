@@ -15,6 +15,6 @@ Usage: python monotest.py
 import cv2
 
 img = cv2.imread(
-    r"path/to/image.png",
+    r"path/to/image.png",  # important to retain r"" format so that python can correctly read the path to the file.
     cv2.IMREAD_UNCHANGED)
 print("dtype:", img.dtype, "  max value:", img.max(), "  shape:", img.shape)
