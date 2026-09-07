@@ -1,6 +1,12 @@
 """
 -------------------------------- camera_gui.py ------------------------------------------
-Camera test GUI: connect to the camera, click trigger, see the result and inference time.
+Connect up to two cameras, click trigger and see each camera's annotated result. Also
+includes timing per camera and a combined time.
+
+Cameras are identified by their configured UserDefinedName (CAM_1, CAM_2,...) rather
+than based on a random enumeration order, so that the physical cameras stay consistent
+across runs regardless if they get unplugged or any network errors occur. Update
+CAMERA_NAMES to match the user ID's set for the cameras in MVS.
 
 Usage: python camera_gui.py
 """
@@ -18,8 +24,8 @@ from PIL import Image, ImageTk
 
 # 'Sources Root' in PyCharm only affects imports when a run is launched
 # through PyCharm's own Run/Debug button - it does NOT automatically
-# apply to a terminal session (even PyCharm's integrated one).
-# Adding MvImport to sys.path directly here means the import below works regardless of how this
+# apply to a plain terminal session. Adding MvImport to sys.path
+# directly here means the import below works regardless of how this
 # script is actually launched.
 MVIMPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MvImport")
 if MVIMPORT_DIR not in sys.path:
@@ -33,49 +39,65 @@ from detect_and_classify import load_model, process_frame
 
 EXPOSURE_VAL = 40000.0  # matches cameras.py - adjust to your lighting
 
+# Update to match the two cameras' actual configured UserDefinedName
+# (set via the MVS client software).
+# Add a third entry here later for the 3-camera setup;
+# nothing else in this file assumes exactly two.
+CAMERA_NAMES = ["CAM_1", "CAM_2"]
+
 
 class CameraController:
     """
-    Single-camera connect/trigger/grab/disconnect built on the MVS SDK.
+    One camera connect/trigger/grab/disconnect, identified by
+    UserDefinedName set in MVS.
     """
 
-    def __init__(self, exposure=EXPOSURE_VAL):
+    def __init__(self, user_id, exposure=EXPOSURE_VAL):
+        self.user_id = user_id
         self.cam = None
         self.exposure = exposure
 
-    def connect(self):
-        device_list = MV_CC_DEVICE_INFO_LIST()
-        ret = MvCamera.MV_CC_EnumDevices(MV_GIGE_DEVICE, device_list)
-        if ret != 0:
-            raise RuntimeError(f"Enum Devices failed, ret [0x{ret:x}]")
-        if device_list.nDeviceNum == 0:
-            raise RuntimeError("No GigE cameras found - check power/network connection")
+    def connect(self, device_list):
+        """
+        device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
+        shared across all cameras being connected so enumeration only
+        happens once per Connect click, not once per camera.
+        """
+        matched_device = None
+        for i in range(device_list.nDeviceNum):
+            st_device = cast(device_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
+            name = "".join([chr(c) for c in st_device.SpecialInfo.stGigEInfo.chUserDefinedName
+                            if c != 0]).strip()
+            if name == self.user_id:
+                matched_device = st_device
+                break
 
-        # First camera found - extend to loop over device_list.nDeviceNum
-        st_device = cast(device_list.pDeviceInfo[0], POINTER(MV_CC_DEVICE_INFO)).contents
+        if matched_device is None:
+            raise RuntimeError(f"No camera found with UserDefinedName '{self.user_id}' - "
+                               f"check it's configured and powered on")
 
         cam = MvCamera()
-        ret = cam.MV_CC_CreateHandle(st_device)
+        ret = cam.MV_CC_CreateHandle(matched_device)
         if ret != 0:
-            raise RuntimeError(f"Handle create failed, ret [0x{ret:x}]")
+            raise RuntimeError(f"[{self.user_id}] Handle create failed, ret [0x{ret:x}]")
 
         ret = cam.MV_CC_OpenDevice(MV_ACCESS_Exclusive, 0)
         if ret != 0:
-            raise RuntimeError(f"Open device failed, ret [0x{ret:x}]")
+            raise RuntimeError(f"[{self.user_id}] Open device failed, ret [0x{ret:x}]")
 
-        # --- Trigger config: SOFTWARE setup for the GUI ---
-        # For the real integration, might need to switch these two lines back to
-        # hardware-trigger config instead depending on setup:
+        # --- Trigger config: SOFTWARE  ---
+        # For the real integration, switch these two lines back to
+        # hardware-trigger config instead:
         #   cam.MV_CC_SetEnumValue("TriggerSource", 0)   # Line0
         #   cam.MV_CC_SetEnumValue("TriggerActivation", 0)  # rising edge
         cam.MV_CC_SetEnumValue("TriggerMode", 1)  # 1 = trigger mode on (not free-run)
         cam.MV_CC_SetEnumValue("TriggerSource", 7)  # 7 = Software on most Hikrobot models -
-        # Make sure to confirm these with the actual camera model
+        # CONFIRM against your camera's node viewer
         cam.MV_CC_SetFloatValue("ExposureTime", self.exposure)
 
         ret = cam.MV_CC_StartGrabbing()
         if ret != 0:
-            raise RuntimeError(f"Start grabbing failed, ret [0x{ret:x}]")
+            raise RuntimeError(f"[{self.user_id}] Start grabbing failed, ret [0x{ret:x}]")
 
         self.cam = cam
 
@@ -83,20 +105,20 @@ class CameraController:
         """
         Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel), check with monotest.py
+        expects. Assumes Mono8 (1 byte/pixel).
         """
         if self.cam is None:
-            raise RuntimeError("Camera not connected")
+            raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
         ret = self.cam.MV_CC_SetCommandValue("TriggerSoftware")
         if ret != 0:
-            raise RuntimeError(f"Software trigger failed, ret [0x{ret:x}]")
+            raise RuntimeError(f"[{self.user_id}] Software trigger failed, ret [0x{ret:x}]")
 
         stFrame = MV_FRAME_OUT()
         memset(byref(stFrame), 0, sizeof(stFrame))
         ret = self.cam.MV_CC_GetImageBuffer(stFrame, timeout_ms)
         if ret != 0:
-            raise RuntimeError(f"Get image buffer failed, ret [0x{ret:x}]")
+            raise RuntimeError(f"[{self.user_id}] Get image buffer failed, ret [0x{ret:x}]")
 
         width = stFrame.stFrameInfo.nWidth
         height = stFrame.stFrameInfo.nHeight
@@ -116,7 +138,7 @@ class CameraController:
                 self.cam.MV_CC_CloseDevice()
                 self.cam.MV_CC_DestroyHandle()
             except Exception as e:
-                print(f"Error during camera cleanup: {e}")
+                print(f"[{self.user_id}] Error during camera cleanup: {e}")
             self.cam = None
 
 
@@ -129,29 +151,42 @@ class ShellSorterGUI:
         self.model, self.device, self.classes = load_model()
         print(f"Loaded model, classes = {self.classes}")
 
-        self.camera = CameraController()
+        self.cameras = {name: CameraController(name) for name in CAMERA_NAMES}
+        self.connected = {name: False for name in CAMERA_NAMES}
 
-        # NOTE: deliberately no width/height set here. Tkinter measures
-        # Label width/height in CHARACTER units while showing text, but
-        # in PIXELS once only an image is displayed - setting a fixed
-        # width/height at creation time (meant to size the text
-        # placeholder reasonably) collapsed the box to a tiny
-        # ~60x20 PIXEL box the moment an image replaced the text,
-        # regardless of the image's actual size or any thumbnail
-        # resizing. Letting the Label auto-size to its actual content
-        # avoids this entirely.
-        self.image_label = tk.Label(root, text="(no image yet)")
-        self.image_label.pack(padx=10, pady=10)
+        # One column per camera, side by side, each with its own image
+        # and status line - so results can be compared at a glance.
+        columns = tk.Frame(root)
+        columns.pack(padx=10, pady=10)
 
-        self.status_var = tk.StringVar(value="Not connected")
-        tk.Label(root, textvariable=self.status_var, font=("Arial", 11)).pack()
+        self.image_labels = {}
+        self.camera_status_vars = {}
+        for i, name in enumerate(CAMERA_NAMES):
+            col = tk.Frame(columns, padx=10)
+            col.grid(row=0, column=i)
+
+            tk.Label(col, text=name, font=("Arial", 12, "bold")).pack()
+
+            # NOTE: deliberately no width/height set here - Tkinter
+            # measures Label width/height in CHARACTER units while
+            # showing text but in PIXELS once only an image is
+            # displayed, so a fixed value meant to size the text
+            # placeholder collapses the box the moment an image
+            # replaces the text. Auto-sizing avoids that entirely.
+            img_label = tk.Label(col, text="(no image yet)")
+            img_label.pack()
+            self.image_labels[name] = img_label
+
+            status_var = tk.StringVar(value="Not connected")
+            tk.Label(col, textvariable=status_var, font=("Arial", 10)).pack()
+            self.camera_status_vars[name] = status_var
 
         self.timing_var = tk.StringVar(value="")
-        tk.Label(root, textvariable=self.timing_var, font=("Arial", 11, "bold")).pack()
+        tk.Label(root, textvariable=self.timing_var, font=("Arial", 11, "bold")).pack(pady=(5, 0))
 
         btn_frame = tk.Frame(root)
         btn_frame.pack(pady=10)
-        self.connect_btn = tk.Button(btn_frame, text="Connect Camera", command=self.on_connect)
+        self.connect_btn = tk.Button(btn_frame, text="Connect Cameras", command=self.on_connect)
         self.connect_btn.pack(side=tk.LEFT, padx=5)
         self.trigger_btn = tk.Button(btn_frame, text="Trigger", command=self.on_trigger,
                                      state=tk.DISABLED)
@@ -161,51 +196,89 @@ class ShellSorterGUI:
 
     def on_connect(self):
         try:
-            self.camera.connect()
-            self.status_var.set("Camera connected")
-            self.trigger_btn.config(state=tk.NORMAL)
-            self.connect_btn.config(state=tk.DISABLED)
+            device_list = MV_CC_DEVICE_INFO_LIST()
+            ret = MvCamera.MV_CC_EnumDevices(MV_GIGE_DEVICE, device_list)
+            if ret != 0:
+                raise RuntimeError(f"Enum Devices failed, ret [0x{ret:x}]")
+            if device_list.nDeviceNum == 0:
+                raise RuntimeError("No GigE cameras found - check power/network connection")
         except Exception as e:
-            messagebox.showerror("Connection failed", str(e))
-            self.status_var.set(f"Connection failed: {e}")
+            messagebox.showerror("Enumeration failed", str(e))
+            return
+
+        # Each camera connects independently, so one failing doesn't
+        # block the other - useful when testing with only one camera
+        # plugged in, or debugging which of the two has a problem.
+        failures = []
+        for name, cam in self.cameras.items():
+            try:
+                cam.connect(device_list)
+                self.connected[name] = True
+                self.camera_status_vars[name].set("Connected")
+            except Exception as e:
+                self.connected[name] = False
+                self.camera_status_vars[name].set(f"FAILED: {e}")
+                failures.append(name)
+
+        if failures:
+            messagebox.showwarning(
+                "Partial connection",
+                f"Failed to connect: {', '.join(failures)}. "
+                f"Trigger will still work for whichever camera(s) connected.")
+
+        if any(self.connected.values()):
+            self.trigger_btn.config(state=tk.NORMAL)
+        self.connect_btn.config(state=tk.DISABLED)
 
     def on_trigger(self):
         self.trigger_btn.config(state=tk.DISABLED)
         self.root.update()
+
+        total_start = time.perf_counter()
+        per_camera_ms = {}
         try:
-            capture_start = time.perf_counter()
-            frame = self.camera.grab_frame()
-            grab_ms = (time.perf_counter() - capture_start) * 1000
+            for name, cam in self.cameras.items():
+                if not self.connected[name]:
+                    continue
 
-            annotated, results, process_ms = process_frame(
-                frame, self.model, self.device, self.classes)
+                capture_start = time.perf_counter()
+                frame = cam.grab_frame()
+                grab_ms = (time.perf_counter() - capture_start) * 1000
 
-            self.display_frame(annotated)
+                annotated, results, process_ms = process_frame(
+                    frame, self.model, self.device, self.classes)
+                per_camera_ms[name] = grab_ms + process_ms
 
-            n_good = sum(1 for r in results if r["class"] == "good")
-            n_bad = sum(1 for r in results if r["class"] == "bad")
-            self.status_var.set(f"Found {len(results)} shell(s) - {n_good} good, {n_bad} bad")
-            self.timing_var.set(
-                f"Capture: {grab_ms:.1f} ms   |   Processing: {process_ms:.1f} ms   |   "
-                f"Total: {grab_ms + process_ms:.1f} ms")
+                self.display_frame(name, annotated)
+
+                n_good = sum(1 for r in results if r["class"] == "good")
+                n_bad = sum(1 for r in results if r["class"] == "bad")
+                self.camera_status_vars[name].set(
+                    f"{len(results)} shell(s) - {n_good} good, {n_bad} bad "
+                    f"(capture {grab_ms:.1f} ms, processing {process_ms:.1f} ms)")
+
+            total_ms = (time.perf_counter() - total_start) * 1000
+            per_cam_summary = "  |  ".join(f"{n}: {ms:.1f} ms" for n, ms in per_camera_ms.items())
+            self.timing_var.set(f"{per_cam_summary}   ||   Total (both cameras): {total_ms:.1f} ms")
         except Exception as e:
             messagebox.showerror("Trigger failed", str(e))
-            self.status_var.set(f"Trigger failed: {e}")
         finally:
             self.trigger_btn.config(state=tk.NORMAL)
 
-    def display_frame(self, annotated_bgr):
+    def display_frame(self, camera_name, annotated_bgr):
         rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         # real camera frames are ~5472x3648 - shrink for on-screen display,
-        # the full-resolution annotation quality isn't lost, just the view
-        pil_img.thumbnail((900, 700))
+        # smaller per-camera since two need to fit side by side now
+        pil_img.thumbnail((650, 500))
         tk_img = ImageTk.PhotoImage(pil_img)
-        self.image_label.configure(image=tk_img, text="")
-        self.image_label.image = tk_img  # keep a reference - Tkinter drops it otherwise
+        label = self.image_labels[camera_name]
+        label.configure(image=tk_img, text="")
+        label.image = tk_img  # keep a reference - Tkinter drops it otherwise
 
     def on_close(self):
-        self.camera.disconnect()
+        for cam in self.cameras.values():
+            cam.disconnect()
         self.root.destroy()
 
 
