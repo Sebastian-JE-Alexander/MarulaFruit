@@ -11,10 +11,12 @@ CAMERA_NAMES to match the user ID's set for the cameras in MVS.
 Usage: python camera_gui.py
 """
 
+import csv
 import os
 import sys
 import time
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox
 from ctypes import *
 
@@ -36,23 +38,22 @@ from MvErrorDefine_const import *
 from CameraParams_header import *
 
 from detect_and_classify import load_model, process_frame
+import config
 
-EXPOSURE_VAL = 172025.0  # matches cameras.py - adjust to your lighting
 
-# Update to match the two cameras' actual configured UserDefinedName
-# (set via the MVS client software).
-# Add a third entry here later for the 3-camera setup;
-# nothing else in this file assumes exactly two.
-CAMERA_NAMES = ["CAM_1", "CAM_2", "CAM_3"]
+# EXPOSURE_VAL and CAMERA_NAMES now live in config.py - update them
+# there (not here) so this file and any future camera-related script
+# stay in sync automatically.
 
 
 class CameraController:
     """
-    One camera connect/trigger/grab/disconnect, identified by
-    UserDefinedName set in MVS.
+    One camera's connect/trigger/grab/disconnect, identified by
+    UserDefinedName - adapted from cameras.py's init_all_cameras() for
+    software triggering instead of hardware.
     """
 
-    def __init__(self, user_id, exposure=EXPOSURE_VAL):
+    def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
         self.cam = None
         self.exposure = exposure
@@ -85,9 +86,9 @@ class CameraController:
         if ret != 0:
             raise RuntimeError(f"[{self.user_id}] Open device failed, ret [0x{ret:x}]")
 
-        # --- Trigger config: SOFTWARE  ---
-        # For the real integration, switch these two lines back to
-        # hardware-trigger config instead:
+        # --- Trigger config: SOFTWARE for this benchtop GUI ---
+        # For the real belt integration, switch these two lines back to
+        # cameras.py's hardware-trigger config instead:
         #   cam.MV_CC_SetEnumValue("TriggerSource", 0)   # Line0
         #   cam.MV_CC_SetEnumValue("TriggerActivation", 0)  # rising edge
         cam.MV_CC_SetEnumValue("TriggerMode", 1)  # 1 = trigger mode on (not free-run)
@@ -151,8 +152,12 @@ class ShellSorterGUI:
         self.model, self.device, self.classes = load_model()
         print(f"Loaded model, classes = {self.classes}")
 
-        self.cameras = {name: CameraController(name) for name in CAMERA_NAMES}
-        self.connected = {name: False for name in CAMERA_NAMES}
+        self.cameras = {name: CameraController(name) for name in config.CAMERA_NAMES}
+        self.connected = {name: False for name in config.CAMERA_NAMES}
+        self.trigger_count = 0
+
+        os.makedirs(config.OUTPUTS_DIR, exist_ok=True)
+        os.makedirs(config.CAMERA_CAPTURES_DIR, exist_ok=True)
 
         # One column per camera, side by side, each with its own image
         # and status line - so results can be compared at a glance.
@@ -161,7 +166,7 @@ class ShellSorterGUI:
 
         self.image_labels = {}
         self.camera_status_vars = {}
-        for i, name in enumerate(CAMERA_NAMES):
+        for i, name in enumerate(config.CAMERA_NAMES):
             col = tk.Frame(columns, padx=10)
             col.grid(row=0, column=i)
 
@@ -234,6 +239,9 @@ class ShellSorterGUI:
         self.trigger_btn.config(state=tk.DISABLED)
         self.root.update()
 
+        self.trigger_count += 1
+        trigger_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.trigger_count:04d}"
+
         total_start = time.perf_counter()
         per_camera_ms = {}
         try:
@@ -250,6 +258,8 @@ class ShellSorterGUI:
                 per_camera_ms[name] = grab_ms + process_ms
 
                 self.display_frame(name, annotated)
+                self.log_trigger_results(trigger_id, name, frame, annotated,
+                                         results, grab_ms, process_ms)
 
                 n_good = sum(1 for r in results if r["class"] == "good")
                 n_bad = sum(1 for r in results if r["class"] == "bad")
@@ -264,6 +274,55 @@ class ShellSorterGUI:
             messagebox.showerror("Trigger failed", str(e))
         finally:
             self.trigger_btn.config(state=tk.NORMAL)
+
+    def log_trigger_results(self, trigger_id, camera_name, raw_frame, annotated_frame,
+                            results, grab_ms, process_ms):
+        """
+        Saves the raw + annotated frame for this camera/trigger to
+        outputs/camera_captures/, and appends one CSV row per detected
+        shell to outputs/camera_results_log.csv (one row with class=""
+        if zero shells were found, so a trigger with no detections still
+        shows up in the log rather than silently vanishing).
+
+        Two things this is for: reviewing a testing session afterward
+        without having to remember what happened at each click, and
+        building up a pool of real captured frames as candidate future
+        training data - these are genuine camera captures, not curated
+        photos, which is exactly the kind of data this project has
+        repeatedly found itself short of (new backgrounds, new angles,
+        new physical shells).
+        """
+        raw_path = os.path.join(config.CAMERA_CAPTURES_DIR,
+                                f"{trigger_id}_{camera_name}_raw.png")
+        annotated_path = os.path.join(config.CAMERA_CAPTURES_DIR,
+                                      f"{trigger_id}_{camera_name}_annotated.png")
+        cv2.imwrite(raw_path, raw_frame)
+        cv2.imwrite(annotated_path, annotated_frame)
+
+        file_exists = os.path.isfile(config.CAMERA_RESULTS_LOG_PATH)
+        fieldnames = ["timestamp", "trigger_id", "camera", "shell_index", "class",
+                      "confidence", "bbox", "capture_ms", "processing_ms",
+                      "raw_path", "annotated_path"]
+        with open(config.CAMERA_RESULTS_LOG_PATH, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+
+            rows = results if results else [None]  # log a placeholder row for zero-shell triggers
+            for i, r in enumerate(rows):
+                writer.writerow({
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "trigger_id": trigger_id,
+                    "camera": camera_name,
+                    "shell_index": i if r else "",
+                    "class": r["class"] if r else "",
+                    "confidence": round(r["confidence"], 4) if r else "",
+                    "bbox": r["bbox"] if r else "",
+                    "capture_ms": round(grab_ms, 2),
+                    "processing_ms": round(process_ms, 2),
+                    "raw_path": raw_path,
+                    "annotated_path": annotated_path,
+                })
 
     def display_frame(self, camera_name, annotated_bgr):
         rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)

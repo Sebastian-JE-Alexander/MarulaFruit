@@ -13,7 +13,7 @@ Run this script before training to catch problems with our image dataset before 
 3. Duplicate files across train/validation - catches any copy-paste of the same
    file in both sides of the split.
 
-Useage: python dataset_health_check.py
+Usage: python dataset_health_check.py
 
 """
 
