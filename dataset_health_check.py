@@ -24,9 +24,12 @@ from collections import Counter
 import cv2
 import numpy as np
 
-TRAIN_DIR = "dataset_images/train"
-VAL_DIR = "dataset_images/validation"
-VALID_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp"]  # Try to ensure that images are in .png format to retain as much info as possible.
+import config
+
+TRAIN_DIR = config.TRAIN_DIR
+VAL_DIR = config.VAL_DIR
+VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp")
+
 
 def list_images(folder):
     if not os.path.isdir(folder):
@@ -42,18 +45,18 @@ def file_hash(path):
 
 def check_class_counts(train_dir, val_dir):
     print("=" * 64)
-    print("Class Counts")
+    print("CLASS COUNTS")
     print("=" * 64)
 
     classes = set()
     for base in (train_dir, val_dir):
         if os.path.isdir(base):
-            classes.update(c for c in os.listdir(base) if os.path.isdir(os.path.join(base, c)))
-
+            classes.update(c for c in os.listdir(base)
+                           if os.path.isdir(os.path.join(base, c)))
     classes = sorted(classes)
 
     if not classes:
-        print(" No class folders found under either directory")
+        print("  No class folders found under either directory.")
         return {}
 
     counts = {}
@@ -66,36 +69,37 @@ def check_class_counts(train_dir, val_dir):
 
         flag = ""
         if total == 0:
-            flag = " <-- Empty, no images found "
+            flag = "  <-- EMPTY, no images at all"
         elif n_train == 0:
-            flag = " <-- no training images found "
+            flag = "  <-- no training images"
         elif n_val == 0:
-            flag = " <-- no validation images found "
+            flag = "  <-- no validation images"
         elif not (10 <= val_pct <= 30):
-            flag = " <-- training validation split is {val_pct:.0f}% (target ~15-25%) "
+            flag = f"  <-- val split is {val_pct:.0f}% (target ~15-25%)"
 
-        print(f" {cls:25s} train={n_train:4d}  val={n_val:4d} "
+        print(f"  {cls:25s} train={n_train:4d}  val={n_val:4d}  "
               f"(val {val_pct:4.0f}%){flag}")
 
     train_counts = [c[0] for c in counts.values() if c[0] > 0]
     if len(train_counts) >= 2:
         ratio = max(train_counts) / min(train_counts)
-        print(f"\n Class balance (train, max/min: {ratio:.2f}x", end="")
+        print(f"\n  Class balance (train, max/min): {ratio:.2f}x", end="")
         if ratio > 5:
-            print(" <-- large imbalance. train.py's class weighting "
-                  "compensates in the loss function, but the smaller"
-                  "class might not have enough images to learn"
-                  "regardless of class weighting.")
+            print("  <-- large imbalance. train.py's class weighting "
+                  "compensates in the loss function, but the minority "
+                  "class may simply not have enough real images to learn "
+                  "its full appearance from, regardless of weighting.")
         elif ratio > 2:
-            print(" <-- moderate imbalance, class weighting should handle this. ")
+            print("  <-- moderate imbalance, class weighting should handle this fine")
         else:
-            print(" <-- small imbalance. ")
+            print("  (reasonably balanced)")
+
     return counts
 
 
 def check_file_integrity(train_dir, val_dir):
     print("\n" + "=" * 64)
-    print ("File Integrity")
+    print("FILE INTEGRITY")
     print("=" * 64)
 
     all_paths = []
@@ -108,7 +112,7 @@ def check_file_integrity(train_dir, val_dir):
                 all_paths.extend(list_images(cls_dir))
 
     if not all_paths:
-        print(" No images found to check.")
+        print("  No images found to check.")
         return
 
     unreadable, sizes, color_flags = [], [], []
@@ -125,25 +129,25 @@ def check_file_integrity(train_dir, val_dir):
                 color_flags.append(path)
 
     if unreadable:
-        print(f" {len(unreadable)} files failed to open:")
+        print(f"  {len(unreadable)} file(s) FAILED TO OPEN:")
         for p in unreadable:
-            print(f"   {p}")
-        else:
-            print(f" All {len(all_paths)} images opened successfully.")
+            print(f"    {p}")
+    else:
+        print(f"  All {len(all_paths)} images opened successfully.")
+
     if sizes:
         size_counts = Counter(sizes)
         if len(size_counts) > 1:
             (common_size, common_n) = size_counts.most_common(1)[0]
-            print(f"\n Image sizes are NOT all consistent, most common is " 
-                  f"{common_size[0]}x{common_size[1]}  ({common_n} /{len(sizes)})."
+            print(f"\n  Image sizes are NOT all consistent - most common is "
+                  f"{common_size[0]}x{common_size[1]} ({common_n}/{len(sizes)}). "
                   f"Other sizes found:")
             for size, n in size_counts.most_common():
                 if size != common_size:
-                    print(f"  {size[0]}x{size[1]}: {n} images")
-
+                    print(f"    {size[0]}x{size[1]}: {n} image(s)")
         else:
             (w, h) = next(iter(size_counts))
-            print(f"\n All images are a consistent {w}x{h}.")
+            print(f"\n  All images are a consistent {w}x{h}.")
 
     if color_flags:
         print(f"\n  {len(color_flags)} image(s) have real colour content "
@@ -207,11 +211,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
