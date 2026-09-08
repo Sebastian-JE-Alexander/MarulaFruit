@@ -181,7 +181,7 @@ def log_training_run(log_path="outputs/training_log.csv", **kwargs):
 
 
 def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
-         epochs=100, lr=1e-3, weight_decay=1e-4, patience=18):
+         epochs=120, lr=1e-3, weight_decay=1e-4, patience=20):
     training_start = time.perf_counter()
     set_seed()
     os.makedirs("outputs", exist_ok=True)

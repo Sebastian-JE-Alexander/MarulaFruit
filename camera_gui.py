@@ -43,7 +43,7 @@ EXPOSURE_VAL = 172025.0  # matches cameras.py - adjust to your lighting
 # (set via the MVS client software).
 # Add a third entry here later for the 3-camera setup;
 # nothing else in this file assumes exactly two.
-CAMERA_NAMES = ["CAM_1", "CAM_2"]
+CAMERA_NAMES = ["CAM_1", "CAM_2", "CAM_3"]
 
 
 class CameraController:
