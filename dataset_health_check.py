@@ -26,7 +26,7 @@ import numpy as np
 
 TRAIN_DIR = "dataset_images/train"
 VAL_DIR = "dataset_images/validation"
-VALID_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp"]
+VALID_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp"]  # Try to ensure that images are in .png format to retain as much info as possible.
 
 def list_images(folder):
     if not os.path.isdir(folder):
