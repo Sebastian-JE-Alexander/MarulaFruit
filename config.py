@@ -29,6 +29,13 @@ SEGMENTATION_CHECK_DIR = f"{OUTPUTS_DIR}/segmentation_check"
 CAMERA_RESULTS_LOG_PATH = f"{OUTPUTS_DIR}/camera_results_log.csv"
 CAMERA_CAPTURES_DIR = f"{OUTPUTS_DIR}/camera_captures"
 
+# Set explicitly if the logos/ folder ever have more than one image and
+# you need a specific one - otherwise camera_gui.py autodetects the
+# first image file it finds.
+
+LOGO_PATH = None
+LOGO_DIR = "logos"
+
 
 # ---------------------------- Segmentation -------------------------------------
 # Tuned for 5472x3648 pixel camera frames -rescale if camera resolution or distance
@@ -52,7 +59,7 @@ CAMERA_NAMES = ["CAM_1", "CAM_2", "CAM_3"]
 
 # ---------------------------- Display Colours --------------------------------
 # BGR - OpenCV's channel order, not RGB
-CLASS_COLORS = {
+CLASS_COLOURS = {
     "good": (0, 200, 0),
     "bad": (0, 0, 255)
 }

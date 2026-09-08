@@ -12,6 +12,7 @@ Usage: python camera_gui.py
 """
 
 import csv
+import glob
 import os
 import sys
 import time
@@ -43,15 +44,37 @@ import config
 
 # EXPOSURE_VAL and CAMERA_NAMES now live in config.py - update them
 # there (not here) so this file and any future camera-related script
-# stay in sync automatically.
+# stay in sync automatically. CAMERA_NAMES: update to match your two
+# cameras' actual configured UserDefinedName (set via the MVS client
+# software) - same "CAM_N" convention as cameras.py. Add a third entry
+# there later for the 3-camera setup; nothing in this file assumes
+# exactly two.
+
+
+def find_logo_path():
+    """Returns config.LOGO_PATH if set and it exists, otherwise
+    auto-detects the first image file in config.LOGO_DIR (your 'logos'
+    folder). Returns None if nothing is found, so the GUI can skip the
+    logo gracefully rather than crashing on startup."""
+    if config.LOGO_PATH and os.path.isfile(config.LOGO_PATH):
+        return config.LOGO_PATH
+    if os.path.isdir(config.LOGO_DIR):
+        candidates = sorted(
+            f for ext in ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif")
+            for f in glob.glob(os.path.join(config.LOGO_DIR, ext))
+        )
+        if candidates:
+            if len(candidates) > 1:
+                print(f"Multiple images found in {config.LOGO_DIR}/, using "
+                      f"{candidates[0]} - set config.LOGO_PATH explicitly to pick a different one.")
+            return candidates[0]
+    return None
 
 
 class CameraController:
-    """
-    One camera's connect/trigger/grab/disconnect, identified by
+    """One camera's connect/trigger/grab/disconnect, identified by
     UserDefinedName - adapted from cameras.py's init_all_cameras() for
-    software triggering instead of hardware.
-    """
+    software triggering instead of hardware."""
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
@@ -59,11 +82,9 @@ class CameraController:
         self.exposure = exposure
 
     def connect(self, device_list):
-        """
-        device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
+        """device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
         shared across all cameras being connected so enumeration only
-        happens once per Connect click, not once per camera.
-        """
+        happens once per Connect click, not once per camera."""
         matched_device = None
         for i in range(device_list.nDeviceNum):
             st_device = cast(device_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
@@ -103,11 +124,9 @@ class CameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=2000):
-        """
-        Fires the software trigger, retrieves one frame, returns it
+        """Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel).
-        """
+        expects. Assumes Mono8 (1 byte/pixel)."""
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -155,9 +174,21 @@ class ShellSorterGUI:
         self.cameras = {name: CameraController(name) for name in config.CAMERA_NAMES}
         self.connected = {name: False for name in config.CAMERA_NAMES}
         self.trigger_count = 0
+        self.last_trigger_id = None
+        self.last_trigger_data = {}  # camera_name -> capture data, populated by on_trigger, consumed by on_save
 
         os.makedirs(config.OUTPUTS_DIR, exist_ok=True)
         os.makedirs(config.CAMERA_CAPTURES_DIR, exist_ok=True)
+
+        logo_path = find_logo_path()
+        if logo_path:
+            logo_img = Image.open(logo_path)
+            logo_img.thumbnail((300, 100))  # header-sized, not overwhelming the window
+            self.logo_tk = ImageTk.PhotoImage(logo_img)  # kept as self. attr - Tkinter drops it otherwise
+            tk.Label(root, image=self.logo_tk).pack(pady=(10, 0))
+        else:
+            print(f"No logo found in {config.LOGO_DIR}/ - skipping logo display "
+                  f"(set config.LOGO_PATH explicitly, or add an image to that folder)")
 
         # One column per camera, side by side, each with its own image
         # and status line - so results can be compared at a glance.
@@ -196,6 +227,9 @@ class ShellSorterGUI:
         self.trigger_btn = tk.Button(btn_frame, text="Trigger", command=self.on_trigger,
                                      state=tk.DISABLED)
         self.trigger_btn.pack(side=tk.LEFT, padx=5)
+        self.save_btn = tk.Button(btn_frame, text="Save Capture", command=self.on_save,
+                                  state=tk.DISABLED)
+        self.save_btn.pack(side=tk.LEFT, padx=5)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -237,10 +271,13 @@ class ShellSorterGUI:
 
     def on_trigger(self):
         self.trigger_btn.config(state=tk.DISABLED)
+        self.save_btn.config(state=tk.DISABLED)
         self.root.update()
 
         self.trigger_count += 1
         trigger_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.trigger_count:04d}"
+        self.last_trigger_id = trigger_id
+        self.last_trigger_data = {}
 
         total_start = time.perf_counter()
         per_camera_ms = {}
@@ -258,8 +295,16 @@ class ShellSorterGUI:
                 per_camera_ms[name] = grab_ms + process_ms
 
                 self.display_frame(name, annotated)
-                self.log_trigger_results(trigger_id, name, frame, annotated,
-                                         results, grab_ms, process_ms)
+
+                # Stored, not saved to disk yet - on_save() writes this
+                # out when (and only when) the Save Capture button is
+                # pressed, so triggering to preview a result doesn't
+                # silently fill up outputs/camera_captures/ with frames
+                # you were just looking at.
+                self.last_trigger_data[name] = {
+                    "raw_frame": frame, "annotated": annotated, "results": results,
+                    "grab_ms": grab_ms, "process_ms": process_ms,
+                }
 
                 n_good = sum(1 for r in results if r["class"] == "good")
                 n_bad = sum(1 for r in results if r["class"] == "bad")
@@ -270,15 +315,35 @@ class ShellSorterGUI:
             total_ms = (time.perf_counter() - total_start) * 1000
             per_cam_summary = "  |  ".join(f"{n}: {ms:.1f} ms" for n, ms in per_camera_ms.items())
             self.timing_var.set(f"{per_cam_summary}   ||   Total (both cameras): {total_ms:.1f} ms")
+
+            if self.last_trigger_data:
+                self.save_btn.config(state=tk.NORMAL)
         except Exception as e:
             messagebox.showerror("Trigger failed", str(e))
         finally:
             self.trigger_btn.config(state=tk.NORMAL)
 
+    def on_save(self):
+        if not self.last_trigger_data:
+            return
+        saved_trigger_id = self.last_trigger_id
+        for name, data in self.last_trigger_data.items():
+            self.log_trigger_results(saved_trigger_id, name, data["raw_frame"],
+                                     data["annotated"], data["results"],
+                                     data["grab_ms"], data["process_ms"])
+        messagebox.showinfo("Saved", f"Saved capture {saved_trigger_id} "
+                                     f"({len(self.last_trigger_data)} camera(s)) to "
+                                     f"{config.CAMERA_CAPTURES_DIR}/ and {config.CAMERA_RESULTS_LOG_PATH}")
+        # Clear the stored data itself, not just the button - the button
+        # state alone only stops real clicks, not a stray second call to
+        # this method by any other path. Clearing the data makes the
+        # guard at the top of this function actually effective either way.
+        self.last_trigger_data = {}
+        self.save_btn.config(state=tk.DISABLED)
+
     def log_trigger_results(self, trigger_id, camera_name, raw_frame, annotated_frame,
                             results, grab_ms, process_ms):
-        """
-        Saves the raw + annotated frame for this camera/trigger to
+        """Saves the raw + annotated frame for this camera/trigger to
         outputs/camera_captures/, and appends one CSV row per detected
         shell to outputs/camera_results_log.csv (one row with class=""
         if zero shells were found, so a trigger with no detections still
