@@ -2,7 +2,7 @@
 -------------------------- config.py ---------------------------------------
 Shared constants for the good vs bad shell prototype.
 
-the current code is generalized so that any future classes can be added
+the current code is generalised so that any future classes can be added
 without changes.
 Add a third class by creating dataset_images/train/<new_class>/ and
 dataset_images/validation/<new_class>/ folders. The ImageFolder function (used in

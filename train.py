@@ -32,13 +32,13 @@ SEED = 42
 
 def set_seed(seed=SEED):
     """
-    Fixes random weight initialization and data shuffling order, so
+    Fixes random weight initialisation and data shuffling order, so
     runs are reproducible and can be fairly compared - without this,
     every run gets a different random starting point, and a genuinely
     unlucky one can cause a 'dead network' (e.g. every ReLU unit stuck
     outputting zero from the first epoch, permanently killing its own
     gradient) that looks like a training failure but is actually just
-    bad luck on initialization, indistinguishable from a real problem
+    bad luck on initialisation, indistinguishable from a real problem
     without a fixed seed to isolate what actually changed between runs.
     """
     random.seed(seed)
