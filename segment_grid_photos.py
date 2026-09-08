@@ -17,7 +17,7 @@ any photos are reshuffled/rephotographed shots of the same physical
 shells, keeping whole photos on one side of the split guarantees no
 crossover between validation and training images.
 
-To run a test segementation to see how your images came out, run this command in the terminal:
+To run a test segmentation to see how your images came out, run this command in the terminal:
 
 python segment_grid_photos.py --input_dir raw_imgs/train/good --val_input_dir raw_imgs/validation/good --class_name good
 python segment_grid_photos.py --input_dir raw_imgs/train/bad --val_input_dir raw_imgs/validation/bad --class_name bad
