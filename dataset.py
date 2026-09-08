@@ -14,23 +14,25 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 
-IMG_SIZE = 128
+import config
 
 
 def build_transform(augment: bool):
     ops = [transforms.Grayscale(num_output_channels=1)]
     if augment:
-        #shells arrive at any rotation on the belt so need to transform images to mimic that
+        # Shells arrive at any rotation on a belt - same rationale as
+        # the earlier TensorFlow and autoencoder pipelines' augmentation.
         ops += [
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
             transforms.RandomRotation(degrees=180),
             transforms.ColorJitter(brightness=0.15, contrast=0.15),
         ]
-    ops += [transforms.Resize((IMG_SIZE, IMG_SIZE)), transforms.ToTensor()]
+    ops += [transforms.Resize((config.IMG_SIZE, config.IMG_SIZE)), transforms.ToTensor()]
     return transforms.Compose(ops)
 
-def make_loader(directory, augment, batch_size=16, shuffle=True):
+
+def make_loader(directory, augment, batch_size=config.BATCH_SIZE, shuffle=True):
     ds = ImageFolder(directory, transform=build_transform(augment))
     loader = DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=0)
-    return loader, len(ds), ds.classes #ds.classes are the real class names in index order
+    return loader, len(ds), ds.classes  # ds.classes: real class names, in index order
