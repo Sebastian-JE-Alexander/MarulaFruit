@@ -32,12 +32,21 @@ import argparse
 import cv2
 import numpy as np
 
+import config
 
-def find_blobs(gray, min_area=5000, max_aspect=2.5, use_adaptive=True):
+
+def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_ASPECT,
+               use_adaptive=True):
     """
     Otsu's method finds ONE global foreground/background split for
     the whole image - this works well when all objects in frame have
-    similar contrast against the background.
+    similar contrast against the background (true for the 79 single-class
+    grid photos this was built against), but testing against a frame
+    with BOTH a high-contrast shell (near-black, ~45) and a moderate-
+    contrast shell (~150) against a ~206 background found that a single
+    global threshold can catch the high-contrast object while missing
+    the moderate-contrast one entirely - exactly the scenario a mixed-
+    class frame (good + bad shells together) could hit in production.
 
     Fix: also run adaptive thresholding (a local threshold computed per
     neighbourhood, not one global value) and merge its detections with
@@ -47,7 +56,6 @@ def find_blobs(gray, min_area=5000, max_aspect=2.5, use_adaptive=True):
     because it's typically cleaner/less noisy on the higher-contrast
     cases. Overlapping detections from both methods are de-duplicated.
     """
-
     masks = []
 
     _, mask_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -58,10 +66,11 @@ def find_blobs(gray, min_area=5000, max_aspect=2.5, use_adaptive=True):
     if use_adaptive:
         # Run adaptive thresholding on a downscaled copy - at full camera
         # resolution (~5472x3648) with the large block size needed above,
-        # this step far too slow to process a real batch of images.
-        # Shell locations don't need pixel-perfect
+        # this step alone was taking ~12s/image, far too slow to process
+        # a real batch of photos. Shell locations don't need pixel-perfect
         # precision (crop_shell adds padding anyway), so detecting at a
-        # smaller scale and mapping boxes back up is a large speedup.
+        # smaller scale and mapping boxes back up is a large speedup for
+        # a cost this task doesn't need paid in full resolution.
         max_dim = 900
         scale = min(1.0, max_dim / max(gray.shape[:2]))
         small = cv2.resize(gray, None, fx=scale, fy=scale) if scale < 1.0 else gray
@@ -71,7 +80,7 @@ def find_blobs(gray, min_area=5000, max_aspect=2.5, use_adaptive=True):
             small, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
             block_size, 5)
         adaptive = cv2.resize(adaptive_small, (gray.shape[1], gray.shape[0]),
-                               interpolation=cv2.INTER_NEAREST)
+                              interpolation=cv2.INTER_NEAREST)
         masks.append(adaptive)
 
     k = max(int(min(gray.shape[:2]) * 0.01), 3)
@@ -99,15 +108,14 @@ def find_blobs(gray, min_area=5000, max_aspect=2.5, use_adaptive=True):
 def _reject_size_outliers(boxes, min_fraction_of_median=0.35):
     """
     Rejects blobs much smaller than the median blob size in this
-    image. Real shells in an image should all be roughly consistent
+    image - real shells in one photo should all be roughly consistent
     size, so a blob at a fraction of that size is far more likely to be
-    an artifact (a shadow, a lighting speck near the frame edge)
+    a small artifact (a shadow, a lighting speck near the frame edge)
     than a genuine shell. More robust than a fixed min_area, which has
-    to be re-tuned any time image resolution or the distance from the
+    to be re-tuned any time image resolution or shell distance-from-
     camera changes; this adapts automatically to whatever scale the
-    marula shells happen to appear at in a given image.
+    real shells happen to appear at in a given photo.
     """
-
     if len(boxes) < 2:
         return boxes
     areas = sorted(b[2] * b[3] for b in boxes)
@@ -125,7 +133,6 @@ def _dedupe_boxes(boxes, iou_threshold=0.5):
     Otsu and adaptive thresholding, keeping the larger (usually
     tighter/more complete) box of any overlapping pair.
     """
-
     if not boxes:
         return []
     boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
@@ -161,17 +168,17 @@ def crop_shell(gray, box, pad_factor=1.25, out_size=160):
     return cv2.resize(crop, (out_size, out_size))
 
 
-def process_class(input_dir, class_name, train_root="dataset_images/train",
-                   val_root="dataset_images/validation", val_fraction=0.2, seed=42,
-                   min_area=5000, expected_per_photo=9):
+def process_class(input_dir, class_name, train_root=config.TRAIN_DIR,
+                  val_root=config.VAL_DIR, val_fraction=config.VAL_FRACTION,
+                  seed=config.SEED, min_area=config.MIN_BLOB_AREA,
+                  expected_per_photo=config.EXPECTED_SHELLS_PER_GRID_PHOTO):
     """
-    Random split, ONLY safe when every photo in input_dir
+    Random photo-level split - ONLY safe when every photo in input_dir
     shows genuinely independent physical shells never repeated in any
     other photo (no reshuffling/rephotographing the same batch). If
     you're reshuffling the same shells for extra pose variety, use
-    process_two_folders() instead.
+    process_two_folders() instead - see its docstring for why.
     """
-
     train_out = os.path.join(train_root, class_name)
     val_out = os.path.join(val_root, class_name)
     os.makedirs(train_out, exist_ok=True)
@@ -190,25 +197,30 @@ def process_class(input_dir, class_name, train_root="dataset_images/train",
     val_photos = set(shuffled[:n_val_photos])
 
     _segment_photos(paths, val_photos, train_out, val_out, class_name,
-                     min_area, expected_per_photo)
+                    min_area, expected_per_photo)
 
 
 def process_two_folders(train_input_dir, val_input_dir, class_name,
-                         train_root="dataset_images/train", val_root="dataset_images/validation",
-                         min_area=5000, expected_per_photo=9):
+                        train_root=config.TRAIN_DIR, val_root=config.VAL_DIR,
+                        min_area=config.MIN_BLOB_AREA,
+                        expected_per_photo=config.EXPECTED_SHELLS_PER_GRID_PHOTO):
     """
     Use this when you've reshuffled/rephotographed the same physical
-    shells for extra pose variety.
+    shells for extra pose variety. Random per-photo splitting (see
+    process_class) can't safely handle that: if the same 9 physical
+    shells are reshuffled and rephotographed 3 times, a random split
+    could put 2 of those photos in training and 1 in validation, meaning
+    the same physical shells appear on both sides of the split - just in
+    different poses. That defeats the point of a held-out validation set.
 
-    The fix is to decide train vs validation at the PHYSICAL
+    The fix is to decide train vs validation at the PHYSICAL SHELL
     level, before any reshuffling: physically set aside a validation
     portion of your shells first, then reshuffle and rephotograph each
-    group as many times as you like WITHIN the group, keeping their photos
+    group as many times as you like WITHIN itself, keeping their photos
     in two separate folders from the start. This function then just
     processes each folder independently - no random splitting, because
     the separation already happened physically, at capture time.
     """
-
     train_out = os.path.join(train_root, class_name)
     val_out = os.path.join(val_root, class_name)
     os.makedirs(train_out, exist_ok=True)
@@ -225,11 +237,11 @@ def process_two_folders(train_input_dir, val_input_dir, class_name,
     all_paths = train_paths + val_paths
     val_set = set(val_paths)
     _segment_photos(all_paths, val_set, train_out, val_out, class_name,
-                     min_area, expected_per_photo)
+                    min_area, expected_per_photo)
 
 
 def _segment_photos(paths, val_photos, train_out, val_out, class_name,
-                     min_area, expected_per_photo):
+                    min_area, expected_per_photo):
     counts_per_photo = []
     total_train, total_val = 0, 0
 
@@ -265,17 +277,17 @@ def _segment_photos(paths, val_photos, train_out, val_out, class_name,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_dir",
-                         help="Folder of raw 3x3 grid .png photos for ONE class - "
-                              "random photo-level split. Only safe if photos are NOT "
-                              "reshuffled shots of the same physical shells.")
+                        help="Folder of raw 3x3 grid .png photos for ONE class - "
+                             "random photo-level split. Only safe if photos are NOT "
+                             "reshuffled shots of the same physical shells.")
     parser.add_argument("--val_input_dir",
-                         help="If your shells were physically separated into train/validation "
-                              "groups before photographing (recommended if you reshuffled for "
-                              "extra photos), pass --input_dir as the TRAIN photo folder and "
-                              "this as the VALIDATION photo folder. No random splitting is done "
-                              "in this mode - each folder is processed as-is.")
+                        help="If your shells were physically separated into train/validation "
+                             "groups before photographing (recommended if you reshuffled for "
+                             "extra photos), pass --input_dir as the TRAIN photo folder and "
+                             "this as the VALIDATION photo folder. No random splitting is done "
+                             "in this mode - each folder is processed as-is.")
     parser.add_argument("--class_name", required=True,
-                         help="Class name - becomes the subfolder name under dataset_images/train and dataset_images/validation")
+                        help="Class name - becomes the subfolder name under dataset/train and dataset/validation")
     args = parser.parse_args()
 
     if args.val_input_dir:
