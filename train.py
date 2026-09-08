@@ -24,21 +24,18 @@ import numpy as np
 
 from model import ShellClassifier
 from dataset import make_loader
-
-global ax_metrics
-
-SEED = 42
+import config
 
 
-def set_seed(seed=SEED):
+def set_seed(seed=config.SEED):
     """
-    Fixes random weight initialisation and data shuffling order, so
+    Fixes random weight initialization and data shuffling order, so
     runs are reproducible and can be fairly compared - without this,
     every run gets a different random starting point, and a genuinely
     unlucky one can cause a 'dead network' (e.g. every ReLU unit stuck
     outputting zero from the first epoch, permanently killing its own
     gradient) that looks like a training failure but is actually just
-    bad luck on initialisation, indistinguishable from a real problem
+    bad luck on initialization, indistinguishable from a real problem
     without a fixed seed to isolate what actually changed between runs.
     """
     random.seed(seed)
@@ -50,7 +47,7 @@ def set_seed(seed=SEED):
 
 def format_duration(seconds):
     """
-    H:MM:SS for anything over an hour, otherwise M:SS.
+    H:MM:SS for anything over an hour, otherwise M:SS - readable either way.
     """
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
@@ -89,7 +86,7 @@ def run_epoch(model, loader, device, criterion, optimizer=None):
 def compute_class_weights(train_dir, classes):
     """
     Inverse-frequency class weights, so CrossEntropyLoss can't take
-    the shortcut of leaning toward whichever class has more images.
+    the lazy shortcut of leaning toward whichever class has more images.
     Necessary as soon as classes stop being roughly equal in count -
     e.g. if you keep photographing new good shells (real diversity gain)
     while bad stays capped by reshuffling the same limited physical
@@ -110,12 +107,14 @@ def compute_class_weights(train_dir, classes):
     weights = counts.sum() / (len(counts) * counts)  # inverse frequency, normalised
     return weights
 
+
 def compute_binary_metrics(cm, classes):
     """
     Returns None if classes isn't exactly length 2 - TP/TN/FP/FN
-    doesn't have one clean meaning past binary classification. Extracted
-    as its own function so both the confusion matrix AND logger can use
-    the same numbers without computing them twice.
+    doesn't have one clean meaning past binary classification (see the
+    comment in plot_confusion_matrix). Extracted as its own function so
+    both the confusion matrix plot AND the run logger can use the same
+    numbers without computing them twice.
     """
     if len(classes) != 2:
         return None
@@ -133,16 +132,17 @@ def compute_binary_metrics(cm, classes):
     }
 
 
-def log_training_run(log_path="outputs/training_log.csv", **kwargs):
+def log_training_run(log_path=config.TRAINING_LOG_PATH, **kwargs):
     """
-    Appends one row summarising this run to a persistent .csv, so
-    results across training sessions accumulate in one place you
-    can open in Excel. Creates the file with a header on the first-ever run;
-    every run afterwards appends a new row.
+    Appends one row summarizing this run to a persistent CSV, so
+    results across many training sessions accumulate in one place you
+    can open in Excel/Sheets, rather than living only in screenshots you
+    have to dig back through to compare. Creates the file with a header
+    on the first-ever run; every run after that appends a new row.
     """
-    metrics = kwargs.get("metrics", None)
-    class_weights = kwargs.get("class_weights", None)
-    classes = kwargs.get("classes", None)
+    metrics = kwargs.get("metrics")
+    class_weights = kwargs["class_weights"]
+    classes = kwargs["classes"]
 
     row = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -171,7 +171,7 @@ def log_training_run(log_path="outputs/training_log.csv", **kwargs):
         "positive_class": metrics["positive_class"] if metrics else "",
     }
 
-    file_exists = os.path.exists(log_path)
+    file_exists = os.path.isfile(log_path)
     with open(log_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(row.keys()))
         if not file_exists:
@@ -180,11 +180,12 @@ def log_training_run(log_path="outputs/training_log.csv", **kwargs):
     print(f"Appended this run to {log_path}")
 
 
-def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
-         epochs=120, lr=1e-3, weight_decay=1e-4, patience=20):
+def main(train_dir=config.TRAIN_DIR, val_dir=config.VAL_DIR,
+         epochs=config.DEFAULT_EPOCHS, lr=config.DEFAULT_LR,
+         weight_decay=config.DEFAULT_WEIGHT_DECAY, patience=config.DEFAULT_PATIENCE):
     training_start = time.perf_counter()
     set_seed()
-    os.makedirs("outputs", exist_ok=True)
+    os.makedirs(config.OUTPUTS_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -192,7 +193,7 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     val_loader, n_val, val_classes = make_loader(val_dir, augment=False, shuffle=False)
     assert classes == val_classes, (
         f"Train classes {classes} don't match validation classes {val_classes} - "
-        f"check both dataset_images/train/ and dataset_images/validation/ have the same subfolders."
+        f"check both dataset/train/ and dataset/validation/ have the same subfolders."
     )
     print(f"Classes: {classes}")
     print(f"{n_train} training images, {n_val} validation images")
@@ -232,7 +233,7 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_without_improvement = 0
-            torch.save(model.state_dict(), "outputs/shell_classifier.pt")
+            torch.save(model.state_dict(), config.MODEL_WEIGHTS_PATH)
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= patience:
@@ -240,9 +241,9 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
                 break
 
     # reload best checkpoint (mirrors Keras EarlyStopping's restore_best_weights)
-    model.load_state_dict(torch.load("outputs/shell_classifier.pt"))
+    model.load_state_dict(torch.load(config.MODEL_WEIGHTS_PATH))
 
-    with open("outputs/classes.txt", "w") as f:
+    with open(config.CLASSES_PATH, "w") as f:
         f.write("\n".join(classes))
 
     total_seconds = time.perf_counter() - training_start
@@ -252,7 +253,7 @@ def main(train_dir="dataset_images/train", val_dir="dataset_images/validation",
     print(f"\nTotal training time: {format_duration(total_seconds)}  "
           f"({epochs_run} epochs, avg {avg_epoch_seconds:.1f}s/epoch)")
 
-    with open("outputs/training_duration.txt", "w") as f:
+    with open(config.TRAINING_DURATION_PATH, "w") as f:
         f.write(f"device: {device}\n")
         f.write(f"epochs_run: {epochs_run}\n")
         f.write(f"total_seconds: {total_seconds:.2f}\n")
@@ -303,8 +304,8 @@ def plot_history(history):
     ax3.grid(True)
 
     plt.tight_layout()
-    plt.savefig("outputs/training_history.png", dpi=120)
-    print("Saved outputs/training_history.png")
+    plt.savefig(config.TRAINING_HISTORY_PLOT_PATH, dpi=120)
+    print(f"Saved {config.TRAINING_HISTORY_PLOT_PATH}")
 
 
 def plot_confusion_matrix(model, val_loader, device, classes):
@@ -369,8 +370,8 @@ def plot_confusion_matrix(model, val_loader, device, classes):
                         bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray"))
 
     plt.tight_layout()
-    plt.savefig("outputs/confusion_matrix.png", dpi=120)
-    print("Saved outputs/confusion_matrix.png")
+    plt.savefig(config.CONFUSION_MATRIX_PLOT_PATH, dpi=120)
+    print(f"Saved {config.CONFUSION_MATRIX_PLOT_PATH}")
     return metrics
 
 
