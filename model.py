@@ -20,15 +20,28 @@ visual signal:
 
   * Grayscale input (1 channel) - the physical camera is monochrome (Mono8),
     and neither class needs colour/hue to distinguish for the moment.
+
+  * LeakyReLU instead of plain ReLU. A real training run collapsed
+    completely (loss stuck at ln(2), every prediction the same class)
+    from an unlucky random initialization - plain ReLU can permanently
+    "die" (output exactly zero, and therefore have exactly zero
+    gradient forever after) if enough units get pushed negative early
+    on, especially with a small dataset offering little signal to
+    recover with. LeakyReLU lets a small gradient through even for
+    negative inputs, so a unit that starts in a bad spot can still
+    receive a learning signal and correct itself, rather than getting
+    stuck permanently.
 ---------------------------------------------------------------------------------
 """
 
 import torch
 import torch.nn as nn
 
+import config
+
 
 class ShellClassifier(nn.Module):
-    def __init__(self, img_size=128, num_classes=2):
+    def __init__(self, img_size=config.IMG_SIZE, num_classes=2):
         super().__init__()
 
         self.features = nn.Sequential(
@@ -65,5 +78,5 @@ class ShellClassifier(nn.Module):
 if __name__ == "__main__":
     from torchinfo import summary
 
-    model = ShellClassifier(img_size=128, num_classes=2)
-    summary(model, input_size=(1, 1, 128, 128))
+    model = ShellClassifier(img_size=config.IMG_SIZE, num_classes=2)
+    summary(model, input_size=(1, config.IMG_CHANNELS, config.IMG_SIZE, config.IMG_SIZE))
