@@ -27,30 +27,19 @@ from PIL import Image
 from model import ShellClassifier
 from dataset import build_transform
 from segment_grid_photos import find_blobs, crop_shell
-
-COLOURS = {
-    # extend this if you rename classes or add more later; unlisted
-    # classes fall back to DEFAULT_COLOUR below rather than erroring, but
-    # load_model() now warns at startup if any class isn't covered, so
-    # that fallback doesn't happen without warning.
-    # Important to note that openCV deals in BGR rather than RGB here when
-    # setting the colours.
-    "good": (0, 200, 0),
-    "bad": (0, 0, 255),
-}
-DEFAULT_COLOUR = (128, 0, 128)
+import config
 
 
-def load_model(weights_path="outputs/shell_classifier.pt",
-               classes_path="outputs/classes.txt"):
+def load_model(weights_path=config.MODEL_WEIGHTS_PATH,
+               classes_path=config.CLASSES_PATH):
     with open(classes_path) as f:
         classes = f.read().strip().split("\n")
 
-    missing = [c for c in classes if c not in COLOURS]
+    missing = [c for c in classes if c not in config.CLASS_COLOURS]
     if missing:
-        print(f"WARNING: no COLOURS entry for class(es) {missing} - "
-              f"they'll draw as the default colour {DEFAULT_COLOUR}. "
-              f"Add them to the COLOURS dict if "
+        print(f"WARNING: no CLASS_COLOURS entry in config.py for class(es) {missing} - "
+              f"they'll draw as the default colour {config.DEFAULT_COLOUR}. "
+              f"Add them to the COLOURS dict at the top of this file if "
               f"you want them visually distinct.")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ShellClassifier(img_size=128, num_classes=len(classes)).to(device)
@@ -79,12 +68,12 @@ def classify_crop(model, device, crop_gray, classes):
     return classes[idx], float(probs[idx]), ms
 
 
-def process_frame(gray, model, device, classes, min_area=5000):
+def process_frame(gray, model, device, classes, min_area=config.MIN_BLOB_AREA):
     """
-    Core pipeline on an in-memory (H,W) grayscale numpy array.
-    This is what camera_gui.py calls directly on a grabbed
-    frames; detect_and_classify() below wraps this,
-    so both share exactly one implementation rather than drifting
+    Core pipeline on an in-memory (H,W) grayscale numpy array - no disk
+    I/O. This is what camera_gui.py calls directly on a live-grabbed
+    frame; detect_and_classify() below wraps this for the file-based CLI
+    usage, so both share exactly one implementation rather than drifting
     apart over time.
 
     Returns (annotated_bgr, results, total_ms) - total_ms covers the
@@ -107,7 +96,7 @@ def process_frame(gray, model, device, classes, min_area=5000):
         results.append({"bbox": (x, y, w, h), "class": pred_class,
                         "confidence": confidence, "inference_ms": ms})
 
-        colour = COLOURS.get(pred_class, DEFAULT_COLOUR)
+        colour = config.CLASS_COLOURS.get(pred_class, config.DEFAULT_COLOUR)
         cv2.rectangle(annotated, (x, y), (x + w, y + h), colour, 4)
         label = f"{pred_class} {confidence:.0%}"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
@@ -120,7 +109,7 @@ def process_frame(gray, model, device, classes, min_area=5000):
 
 
 def detect_and_classify(image_path, model, device, classes, output_path=None,
-                        min_area=5000):
+                        min_area=config.MIN_BLOB_AREA):
     img = cv2.imread(image_path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
