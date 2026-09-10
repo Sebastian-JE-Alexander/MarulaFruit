@@ -97,8 +97,3 @@ shell_classifier/
  
 
 
-  your specific camera model - check the MVS client's node viewer if
-  triggering fails.
-- PLC/actuator communication isn't built yet - `camera_gui.py`
-  currently only displays results, it doesn't act on them.
- 
