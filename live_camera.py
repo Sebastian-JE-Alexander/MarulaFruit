@@ -261,14 +261,19 @@ class LiveDemoGUI:
         for name, cam in self.cameras.items():
             if not self.connected[name]:
                 continue
+
+            grab_start = time.perf_counter()
             frame = cam.grab_frame()
+            grab_ms = (time.perf_counter() - grab_start) * 1000
             if frame is None:
                 continue  # no new frame ready this cycle - normal in free-run, just skip
 
             annotated, results, process_ms = process_frame(frame, self.model, self.device, self.classes)
             self._display_frame(name, annotated)
             camera_results[name] = results
-            self.camera_status_vars[name].set(f"{len(results)} shell(s) detected  ({process_ms:.1f} ms)")
+            self.camera_status_vars[name].set(
+                f"{len(results)} shell(s) detected  "
+                f"(grab {grab_ms:.0f} ms, segment+classify {process_ms:.0f} ms)")
 
         self._update_verdict(camera_results)
 
