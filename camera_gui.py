@@ -71,7 +71,7 @@ def find_logo_path():
 
 class CameraController:
     """
-    One camera's connect/trigger/grab/disconnect, identified by
+    One camera connect/trigger/grab/disconnect, identified by
     UserDefinedName - adapted from cameras.py's init_all_cameras() for
     software triggering instead of hardware.
     """

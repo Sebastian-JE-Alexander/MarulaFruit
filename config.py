@@ -16,7 +16,8 @@ DATASET_DIR = "dataset_images"
 TRAIN_DIR = f"{DATASET_DIR}/train"
 VAL_DIR = f"{DATASET_DIR}/validation"
 
-# -------------------------------- Output Paths ---------------------------
+# -------------------------------- Output Paths ---------------------------------
+# Sets paths for all the various files that get made whilst running the scripts
 OUTPUTS_DIR = "outputs"
 MODEL_WEIGHTS_PATH = f"{OUTPUTS_DIR}/shell_classifier.pt"
 CLASSES_PATH = f"{OUTPUTS_DIR}/classes.txt"
@@ -31,7 +32,7 @@ CAMERA_CAPTURES_DIR = f"{OUTPUTS_DIR}/camera_captures"
 ONNX_MODEL_PATH = f"{OUTPUTS_DIR}/shell_classifier.onnx"
 ONNX_CLASSES_PATH = f"{OUTPUTS_DIR}/shell_classifier_onnx_classes.txt"
 
-# Set explicitly if the logos/ folder ever have more than one image and
+# Set explicitly if the logos/ folder ever have more than one image, and
 # you need a specific one - otherwise camera_gui.py autodetects the
 # first image file it finds.
 
