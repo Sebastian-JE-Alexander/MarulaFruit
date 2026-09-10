@@ -55,7 +55,7 @@ VAL_FRACTION = 0.2 # for segment_grid_photos.py random-split mode
 
 # ------------------------------ Camera ----------------------------------------
 EXPOSURE_VAL = 172025.0
-CAMERA_NAMES = ["CAM_1", "CAM_2", "CAM_3"]
+CAMERA_NAMES = ["CAM_1", "CAM_2"] #adjust camera count by adding user_id set in MVS here.
 
 # ---------------------------- Display Colours --------------------------------
 # BGR - OpenCV's channel order, not RGB
