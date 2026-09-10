@@ -49,7 +49,7 @@ import config
 
 def find_logo_path():
     """
-    Returns config.LOGO_PATH if set and it exists, otherwise
+    Returns config.LOGO_PATH if set, and it exists, otherwise
     auto-detects the first image file in config.LOGO_DIR.
     Returns None if nothing is found, so the GUI can skip the
     logo rather than crashing on startup.

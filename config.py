@@ -28,6 +28,8 @@ MISCLASSIFIED_DIR = f"{OUTPUTS_DIR}/misclassified"
 SEGMENTATION_CHECK_DIR = f"{OUTPUTS_DIR}/segmentation_check"
 CAMERA_RESULTS_LOG_PATH = f"{OUTPUTS_DIR}/camera_results_log.csv"
 CAMERA_CAPTURES_DIR = f"{OUTPUTS_DIR}/camera_captures"
+ONNX_MODEL_PATH = f"{OUTPUTS_DIR}/shell_classifier.onnx"
+ONNX_CLASSES_PATH = f"{OUTPUTS_DIR}/shell_classifier_onnx_classes.txt"
 
 # Set explicitly if the logos/ folder ever have more than one image and
 # you need a specific one - otherwise camera_gui.py autodetects the
