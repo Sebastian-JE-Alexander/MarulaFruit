@@ -90,13 +90,11 @@ class LiveCameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=500):
-        """
-        No software trigger command needed - the camera is already
+        """No software trigger command needed - the camera is already
         streaming continuously, this just pulls whatever the next
         available frame is. Returns None (not an error) if a frame
         isn't ready within the timeout - normal in free-run mode,
-        just try again next poll.
-        """
+        just try again next poll."""
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -229,6 +227,7 @@ class LiveDemoGUI:
         self.running = True
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
+        self._last_frame_time = None  # tracks true wall-clock time between frames, set on first _loop() call
         self._loop()
 
     def on_stop(self):
@@ -246,7 +245,18 @@ class LiveDemoGUI:
         if not self.running:
             return
 
-        loop_start = time.perf_counter()
+        # True frame-to-frame time - from the start of THIS loop back to
+        # the start of the PREVIOUS one. This is what a person actually
+        # perceives as the frame rate: work time PLUS the deliberate
+        # config.LIVE_POLL_INTERVAL_MS delay after it. Reporting only the
+        # work time (as an earlier version of this did) understates the
+        # real interval and hides whether the delay or the work is
+        # actually the bottleneck - see chat message.
+        now = time.perf_counter()
+        true_frame_ms = (now - self._last_frame_time) * 1000 if self._last_frame_time else None
+        self._last_frame_time = now
+
+        work_start = time.perf_counter()
         camera_results = {}
         for name, cam in self.cameras.items():
             if not self.connected[name]:
@@ -262,9 +272,13 @@ class LiveDemoGUI:
 
         self._update_verdict(camera_results)
 
-        loop_ms = (time.perf_counter() - loop_start) * 1000
-        fps = 1000 / loop_ms if loop_ms > 0 else 0
-        self.fps_var.set(f"Loop: {loop_ms:.0f} ms  (~{fps:.1f} fps)")
+        work_ms = (time.perf_counter() - work_start) * 1000
+        if true_frame_ms is not None:
+            fps = 1000 / true_frame_ms if true_frame_ms > 0 else 0
+            self.fps_var.set(f"Work: {work_ms:.0f} ms  |  Frame-to-frame: {true_frame_ms:.0f} ms  "
+                             f"(~{fps:.1f} fps)  |  Poll delay setting: {config.LIVE_POLL_INTERVAL_MS} ms")
+        else:
+            self.fps_var.set(f"Work: {work_ms:.0f} ms  (first frame)")
 
         self.root.after(config.LIVE_POLL_INTERVAL_MS, self._loop)
 
