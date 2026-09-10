@@ -38,24 +38,22 @@ from MvCameraControl_class import *
 from MvErrorDefine_const import *
 from CameraParams_header import *
 
-from detect_and_classify import load_model, process_frame
+from detect_and_classify import load_model, process_frame, fuse_pass_fail
 import config
 
 
 # EXPOSURE_VAL and CAMERA_NAMES now live in config.py - update them
 # there (not here) so this file and any future camera-related script
-# stay in sync automatically. CAMERA_NAMES: update to match your two
-# cameras' actual configured UserDefinedName (set via the MVS client
-# software) - same "CAM_N" convention as cameras.py. Add a third entry
-# there later for the 3-camera setup; nothing in this file assumes
-# exactly two.
+# stay in sync automatically.
 
 
 def find_logo_path():
-    """Returns config.LOGO_PATH if set and it exists, otherwise
-    auto-detects the first image file in config.LOGO_DIR (your 'logos'
-    folder). Returns None if nothing is found, so the GUI can skip the
-    logo gracefully rather than crashing on startup."""
+    """
+    Returns config.LOGO_PATH if set and it exists, otherwise
+    auto-detects the first image file in config.LOGO_DIR.
+    Returns None if nothing is found, so the GUI can skip the
+    logo rather than crashing on startup.
+    """
     if config.LOGO_PATH and os.path.isfile(config.LOGO_PATH):
         return config.LOGO_PATH
     if os.path.isdir(config.LOGO_DIR):
@@ -72,9 +70,11 @@ def find_logo_path():
 
 
 class CameraController:
-    """One camera's connect/trigger/grab/disconnect, identified by
+    """
+    One camera's connect/trigger/grab/disconnect, identified by
     UserDefinedName - adapted from cameras.py's init_all_cameras() for
-    software triggering instead of hardware."""
+    software triggering instead of hardware.
+    """
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
@@ -82,9 +82,11 @@ class CameraController:
         self.exposure = exposure
 
     def connect(self, device_list):
-        """device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
+        """
+        device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
         shared across all cameras being connected so enumeration only
-        happens once per Connect click, not once per camera."""
+        happens once per Connect click, not once per camera.
+        """
         matched_device = None
         for i in range(device_list.nDeviceNum):
             st_device = cast(device_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
@@ -107,9 +109,9 @@ class CameraController:
         if ret != 0:
             raise RuntimeError(f"[{self.user_id}] Open device failed, ret [0x{ret:x}]")
 
-        # --- Trigger config: SOFTWARE for this benchtop GUI ---
-        # For the real belt integration, switch these two lines back to
-        # cameras.py's hardware-trigger config instead:
+        # ------------------ Trigger config: SOFTWARE --------------------------
+        # For the real integration, switch these two lines to
+        # hardware-trigger config instead:
         #   cam.MV_CC_SetEnumValue("TriggerSource", 0)   # Line0
         #   cam.MV_CC_SetEnumValue("TriggerActivation", 0)  # rising edge
         cam.MV_CC_SetEnumValue("TriggerMode", 1)  # 1 = trigger mode on (not free-run)
@@ -124,9 +126,11 @@ class CameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=2000):
-        """Fires the software trigger, retrieves one frame, returns it
+        """
+        Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel)."""
+        expects. Assumes Mono8 (1 byte/pixel).
+        """
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -190,6 +194,16 @@ class ShellSorterGUI:
             print(f"No logo found in {config.LOGO_DIR}/ - skipping logo display "
                   f"(set config.LOGO_PATH explicitly, or add an image to that folder)")
 
+        # PASS/FAIL readout - Font/colour set
+        # in show_verdict() based on the result; starts neutral grey
+        # with placeholder text before the first trigger.
+        self.verdict_var = tk.StringVar(value="—")
+        self.verdict_label = tk.Label(root, textvariable=self.verdict_var,
+                                      font=("Arial", 36, "bold"), fg="gray")
+        self.verdict_label.pack(pady=(10, 0))
+        self.verdict_detail_var = tk.StringVar(value="")
+        tk.Label(root, textvariable=self.verdict_detail_var, font=("Arial", 10)).pack()
+
         # One column per camera, side by side, each with its own image
         # and status line - so results can be compared at a glance.
         columns = tk.Frame(root)
@@ -246,8 +260,7 @@ class ShellSorterGUI:
             return
 
         # Each camera connects independently, so one failing doesn't
-        # block the other - useful when testing with only one camera
-        # plugged in, or debugging which of the two has a problem.
+        # block the other.
         failures = []
         for name, cam in self.cameras.items():
             try:
@@ -316,12 +329,22 @@ class ShellSorterGUI:
             per_cam_summary = "  |  ".join(f"{n}: {ms:.1f} ms" for n, ms in per_camera_ms.items())
             self.timing_var.set(f"{per_cam_summary}   ||   Total (both cameras): {total_ms:.1f} ms")
 
+            camera_results = {name: data["results"] for name, data in self.last_trigger_data.items()}
+            verdict, explanation, _ = fuse_pass_fail(camera_results)
+            self.show_verdict(verdict, explanation)
+
             if self.last_trigger_data:
                 self.save_btn.config(state=tk.NORMAL)
         except Exception as e:
             messagebox.showerror("Trigger failed", str(e))
         finally:
             self.trigger_btn.config(state=tk.NORMAL)
+
+    def show_verdict(self, verdict, explanation):
+        colours = {"PASS": "green", "FAIL": "red", "ERROR": "orange"}
+        self.verdict_var.set(verdict)
+        self.verdict_label.config(fg=colours.get(verdict, "gray"))
+        self.verdict_detail_var.set(explanation)
 
     def on_save(self):
         if not self.last_trigger_data:
@@ -343,19 +366,12 @@ class ShellSorterGUI:
 
     def log_trigger_results(self, trigger_id, camera_name, raw_frame, annotated_frame,
                             results, grab_ms, process_ms):
-        """Saves the raw + annotated frame for this camera/trigger to
+        """
+        Saves the raw + annotated frame for this camera/trigger to
         outputs/camera_captures/, and appends one CSV row per detected
         shell to outputs/camera_results_log.csv (one row with class=""
         if zero shells were found, so a trigger with no detections still
         shows up in the log rather than silently vanishing).
-
-        Two things this is for: reviewing a testing session afterward
-        without having to remember what happened at each click, and
-        building up a pool of real captured frames as candidate future
-        training data - these are genuine camera captures, not curated
-        photos, which is exactly the kind of data this project has
-        repeatedly found itself short of (new backgrounds, new angles,
-        new physical shells).
         """
         raw_path = os.path.join(config.CAMERA_CAPTURES_DIR,
                                 f"{trigger_id}_{camera_name}_raw.png")

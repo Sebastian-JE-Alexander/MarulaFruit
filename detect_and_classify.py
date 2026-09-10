@@ -121,6 +121,55 @@ def detect_and_classify(image_path, model, device, classes, output_path=None,
     return results, output_path
 
 
+def fuse_pass_fail(camera_results):
+    """
+    Combines single-shell results from multiple camera angles into
+    one PASS/FAIL verdict.
+
+    camera_results: dict of camera_name -> list of shell-result dicts
+    (each with 'class'/'confidence'), i.e. process_frame()'s `results`
+    output per camera, for a frame expected to contain exactly one shell.
+
+    Rule: FAIL if ANY camera calls it 'bad'. PASS only if EVERY camera
+    that saw the shell called it 'good'. Deliberately NOT a confidence
+    average across cameras. The whole point of a second camera
+    angle is catching a defect that's only visible from one side -
+    averaging a clear detection from one camera against a "can't see
+    anything wrong from here" read from the other would dilute exactly
+    the signal the second camera exists to provide. Plain OR logic that
+    is biased towards the 'bad' class.
+
+    Returns (verdict, explanation, per_camera_summary):
+      verdict: "PASS", "FAIL", or "ERROR" (wrong shell count in some camera)
+      per_camera_summary: {camera_name: single result dict}, cameras
+        with a valid single-shell read only
+    """
+    per_camera_summary = {}
+    problems = []
+
+    for name, results in camera_results.items():
+        if len(results) != 1:
+            problems.append(f"{name}: {len(results)} shell(s) found (expected 1)")
+            continue
+        per_camera_summary[name] = results[0]
+
+    if problems:
+        return "ERROR", "; ".join(problems), per_camera_summary
+
+    if not per_camera_summary:
+        return "ERROR", "No camera results to fuse", per_camera_summary
+
+    bad_cams = [name for name, r in per_camera_summary.items() if r["class"] == "bad"]
+
+    if bad_cams:
+        detail = ", ".join(f"{name} ({per_camera_summary[name]['confidence']:.0%})"
+                           for name in bad_cams)
+        return "FAIL", f"bad detected by: {detail}", per_camera_summary
+
+    detail = ", ".join(f"{name} ({r['confidence']:.0%})" for name, r in per_camera_summary.items())
+    return "PASS", f"all camera(s) agree good: {detail}", per_camera_summary
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("image_path")
