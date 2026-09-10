@@ -66,7 +66,7 @@ CLASS_COLOURS = {
     "good": (0, 200, 0),
     "bad": (0, 0, 255)
 }
-DEFAULT_COLOR = (128, 0, 128)
+DEFAULT_COLOUR = (128, 0, 128)
 
 
 # CLASS_NAMES is deliberately NOT hardcoded here - it's inferred from the

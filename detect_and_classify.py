@@ -24,6 +24,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+
 from model import ShellClassifier
 from dataset import build_transform
 from segment_grid_photos import find_blobs, crop_shell
@@ -157,7 +158,7 @@ def fuse_pass_fail(camera_results):
         return "ERROR", "; ".join(problems), per_camera_summary
 
     if not per_camera_summary:
-        return "ERROR", "No camera results to fuse", per_camera_summary
+        return "ERROR", "No camera results to check", per_camera_summary
 
     bad_cams = [name for name, r in per_camera_summary.items() if r["class"] == "bad"]
 
@@ -167,7 +168,7 @@ def fuse_pass_fail(camera_results):
         return "FAIL", f"bad detected by: {detail}", per_camera_summary
 
     detail = ", ".join(f"{name} ({r['confidence']:.0%})" for name, r in per_camera_summary.items())
-    return "PASS", f"all camera(s) agree good: {detail}", per_camera_summary
+    return "PASS", f"all cameras predict good: {detail}", per_camera_summary
 
 
 if __name__ == "__main__":
