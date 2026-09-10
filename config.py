@@ -53,6 +53,7 @@ LOGO_DIR = "logos"
 USE_ONNX = False
 ONNX_PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
+
 # ---------------------------- Segmentation -------------------------------------
 # Tuned for 5472x3648 pixel camera frames -rescale if camera resolution or distance
 # changes meaningfully
@@ -72,6 +73,11 @@ VAL_FRACTION = 0.2 # for segment_grid_photos.py random-split mode
 # ------------------------------ Camera ----------------------------------------
 EXPOSURE_VAL = 172025.0
 CAMERA_NAMES = ["CAM_1", "CAM_2"] #adjust camera count by adding user_id set in MVS here.
+
+# How often live_camera.py grabs+classifies a new frame - lower = more
+# responsive but more CPU/GPU load. 400ms (~2.5fps) is plenty for a
+# human watching a shell get placed; doesn't need to be video-smooth.
+LIVE_POLL_INTERVAL_MS = 400
 
 # ---------------------------- Display Colours --------------------------------
 # BGR - OpenCV's channel order, not RGB

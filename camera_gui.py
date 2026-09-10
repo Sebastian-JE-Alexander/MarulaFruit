@@ -41,52 +41,16 @@ from CameraParams_header import *
 from detect_and_classify import load_model, process_frame, fuse_pass_fail
 import config
 
-# EXPOSURE_VAL and CAMERA_NAMES now live in config.py - update them
-# there (not here) so this file and any future camera-related script
-# stay in sync automatically. CAMERA_NAMES: update to match your two
-# cameras' actual configured UserDefinedName (set via the MVS client
-# software) - same "CAM_N" convention as cameras.py. Add a third entry
-# there later for the 3-camera setup; nothing in this file assumes
-# exactly two.
-
-# --- Visual design tokens ---------------------------------------------
-# One place for the whole palette/typography - change the look here
-# rather than hunting through layout code. Segoe UI is the standard
-# Windows UI font (this runs on a Windows testing PC); Tkinter silently
-# falls back to a system default if it's ever unavailable, so this stays
-# safe on other platforms too, just less polished-looking there.
-FONT_FAMILY = "Segoe UI"
-COLOUR_BG = "#F4F5F7"  # window background
-COLOUR_CARD_BG = "#FFFFFF"  # camera panel background
-COLOUR_CARD_BORDER = "#E2E4E9"
-COLOUR_TEXT = "#1F2430"
-COLOUR_TEXT_MUTED = "#6B7280"
-COLOUR_ACCENT = "#2563EB"  # primary action colour (Trigger button)
-COLOUR_VERDICT = {
-    "PASS": "#16A34A", "FAIL": "#DC2626", "ERROR": "#EA580C", None: "#9CA3AF",
-}
+# EXPOSURE_VAL and CAMERA_NAMES live in config.py; visual design tokens
+# (colours, fonts) live in gui_theme.py, shared with live_camera.py so
+# both GUI scripts can't drift into different colours over time.
+from gui_theme import (FONT_FAMILY, COLOUR_BG, COLOUR_CARD_BG, COLOUR_CARD_BORDER,
+                       COLOUR_TEXT, COLOUR_TEXT_MUTED, COLOUR_ACCENT, COLOUR_VERDICT,
+                       find_logo_path as _find_logo_path)
 
 
 def find_logo_path():
-    """
-    Returns config.LOGO_PATH if set and it exists, otherwise
-    auto-detects the first image file in config.LOGO_DIR (your 'logos'
-    folder). Returns None if nothing is found, so the GUI can skip the
-    logo gracefully rather than crashing on startup.
-    """
-    if config.LOGO_PATH and os.path.isfile(config.LOGO_PATH):
-        return config.LOGO_PATH
-    if os.path.isdir(config.LOGO_DIR):
-        candidates = sorted(
-            f for ext in ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif")
-            for f in glob.glob(os.path.join(config.LOGO_DIR, ext))
-        )
-        if candidates:
-            if len(candidates) > 1:
-                print(f"Multiple images found in {config.LOGO_DIR}/, using "
-                      f"{candidates[0]} - set config.LOGO_PATH explicitly to pick a different one.")
-            return candidates[0]
-    return None
+    return _find_logo_path(config)
 
 
 class CameraController:
@@ -220,7 +184,7 @@ class ShellSorterGUI:
         title_box.pack(side=tk.LEFT, anchor="w")
         tk.Label(title_box, text="Marula Shell Classifier", bg=COLOUR_BG, fg=COLOUR_TEXT,
                  font=(FONT_FAMILY, 18, "bold")).pack(anchor="w")
-        tk.Label(title_box, text="Camera test", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+        tk.Label(title_box, text="Live camera test", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=(FONT_FAMILY, 10)).pack(anchor="w")
 
         ttk.Separator(root, orient="horizontal").pack(fill=tk.X, padx=24, pady=(4, 0))
@@ -433,19 +397,12 @@ class ShellSorterGUI:
 
     def log_trigger_results(self, trigger_id, camera_name, raw_frame, annotated_frame,
                             results, grab_ms, process_ms):
-        """Saves the raw + annotated frame for this camera/trigger to
+        """
+        Saves the raw + annotated frame for this camera/trigger to
         outputs/camera_captures/, and appends one CSV row per detected
         shell to outputs/camera_results_log.csv (one row with class=""
         if zero shells were found, so a trigger with no detections still
         shows up in the log rather than silently vanishing).
-
-        Two things this is for: reviewing a testing session afterward
-        without having to remember what happened at each click, and
-        building up a pool of real captured frames as candidate future
-        training data - these are genuine camera captures, not curated
-        photos, which is exactly the kind of data this project has
-        repeatedly found itself short of (new backgrounds, new angles,
-        new physical shells).
         """
         raw_path = os.path.join(config.CAMERA_CAPTURES_DIR,
                                 f"{trigger_id}_{camera_name}_raw.png")
