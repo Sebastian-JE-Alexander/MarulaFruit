@@ -35,10 +35,63 @@ import numpy as np
 import config
 
 
+def debug_find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_ASPECT):
+    """Same detection as find_blobs(), but returns which method (otsu or
+    adaptive) produced each surviving box, and the boxes BEFORE
+    deduplication too - for diagnosing exactly why a real frame produces
+    more boxes than physical shells actually present. Not used by the
+    normal pipeline - purely a diagnostic entry point.
+
+    Returns dict with keys: 'otsu_raw', 'adaptive_raw' (boxes before any
+    merging/dedup, tagged by source) and 'final' (what find_blobs()
+    would actually return).
+    """
+    masks = {}
+
+    _, mask_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask_otsu_inv = cv2.bitwise_not(mask_otsu)
+    masks["otsu"] = mask_otsu if (mask_otsu > 0).sum() < (mask_otsu_inv > 0).sum() else mask_otsu_inv
+
+    max_dim = 900
+    scale = min(1.0, max_dim / max(gray.shape[:2]))
+    small = cv2.resize(gray, None, fx=scale, fy=scale) if scale < 1.0 else gray
+    block_size = _odd(max(int(min(small.shape[:2]) * 0.35), 151))
+    adaptive_small = cv2.adaptiveThreshold(
+        small, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 5)
+    masks["adaptive"] = cv2.resize(adaptive_small, (gray.shape[1], gray.shape[0]),
+                                   interpolation=cv2.INTER_NEAREST)
+
+    k = max(int(min(gray.shape[:2]) * 0.01), 3)
+    kernel = np.ones((k, k), np.uint8)
+
+    per_method_boxes = {}
+    all_boxes = []
+    for source, mask in masks.items():
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        boxes_this_source = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area < min_area:
+                continue
+            x, y, w, h = cv2.boundingRect(c)
+            aspect = max(w, h) / max(min(w, h), 1)
+            if aspect > max_aspect:
+                continue
+            boxes_this_source.append((x, y, w, h))
+            all_boxes.append((x, y, w, h))
+        per_method_boxes[source] = boxes_this_source
+
+    final = _reject_size_outliers(_dedupe_boxes(all_boxes))
+
+    return {"otsu_raw": per_method_boxes["otsu"], "adaptive_raw": per_method_boxes["adaptive"],
+            "final": final}
+
+
 def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_ASPECT,
                use_adaptive=True):
-    """
-    Otsu's method finds ONE global foreground/background split for
+    """Otsu's method finds ONE global foreground/background split for
     the whole image - this works well when all objects in frame have
     similar contrast against the background (true for the 79 single-class
     grid photos this was built against), but testing against a frame
@@ -106,8 +159,7 @@ def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_A
 
 
 def _reject_size_outliers(boxes, min_fraction_of_median=0.35):
-    """
-    Rejects blobs much smaller than the median blob size in this
+    """Rejects blobs much smaller than the median blob size in this
     image - real shells in one photo should all be roughly consistent
     size, so a blob at a fraction of that size is far more likely to be
     a small artifact (a shadow, a lighting speck near the frame edge)
@@ -127,20 +179,56 @@ def _odd(n):
     return n if n % 2 == 1 else n + 1
 
 
-def _dedupe_boxes(boxes, iou_threshold=0.5):
-    """
-    Removes duplicate detections of the same shell found by both
+def _dedupe_boxes(boxes, iou_threshold=0.5, containment_threshold=0.7):
+    """Removes duplicate detections of the same shell found by both
     Otsu and adaptive thresholding, keeping the larger (usually
     tighter/more complete) box of any overlapping pair.
+
+    Two separate checks, not just IOU: real frames (see chat - two
+    actual double-detection cases diagnosed with diagnose_double_detection.py)
+    showed a smaller box sitting almost entirely INSIDE a larger one
+    (adaptive catching the whole shell, Otsu catching a sub-region of
+    it, or vice versa) with IOU of only 0.19 and 0.38 - both well under
+    the 0.5 threshold, so pure IOU-based dedup never caught either one.
+    This isn't a threshold-tuning problem: a small box fully contained
+    in a big one structurally has low IOU regardless of threshold,
+    because the union stays dominated by the big box's area. Containment
+    is a genuinely different relationship from overlap and needs its
+    own check - if most of a smaller box's area sits inside a larger
+    box, treat them as the same detection regardless of what IOU says.
     """
     if not boxes:
         return []
     boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
     kept = []
     for box in boxes:
-        if not any(_iou(box, k) > iou_threshold for k in kept):
+        is_duplicate = any(
+            _iou(box, k) > iou_threshold or _containment_fraction(box, k) > containment_threshold
+            for k in kept
+        )
+        if not is_duplicate:
             kept.append(box)
     return kept
+
+
+def _containment_fraction(small, big):
+    """What fraction of `small`'s area overlaps with `big` - 1.0 means
+    small sits entirely inside big. Order-independent in effect since
+    _dedupe_boxes always calls this with the box being considered as
+    `small` (boxes are processed largest-first, so anything already in
+    `kept` is >= box in area - this checks how much of the new,
+    smaller-or-equal box is swallowed by what's already kept)."""
+    sx0, sy0, sw, sh = small
+    bx0, by0, bw, bh = big
+    sx1, sy1 = sx0 + sw, sy0 + sh
+    bx1, by1 = bx0 + bw, by0 + bh
+    ix0, iy0 = max(sx0, bx0), max(sy0, by0)
+    ix1, iy1 = min(sx1, bx1), min(sy1, by1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    intersection = (ix1 - ix0) * (iy1 - iy0)
+    small_area = sw * sh
+    return intersection / small_area if small_area else 0.0
 
 
 def _iou(a, b):
@@ -172,13 +260,11 @@ def process_class(input_dir, class_name, train_root=config.TRAIN_DIR,
                   val_root=config.VAL_DIR, val_fraction=config.VAL_FRACTION,
                   seed=config.SEED, min_area=config.MIN_BLOB_AREA,
                   expected_per_photo=config.EXPECTED_SHELLS_PER_GRID_PHOTO):
-    """
-    Random photo-level split - ONLY safe when every photo in input_dir
+    """Random photo-level split - ONLY safe when every photo in input_dir
     shows genuinely independent physical shells never repeated in any
     other photo (no reshuffling/rephotographing the same batch). If
     you're reshuffling the same shells for extra pose variety, use
-    process_two_folders() instead - see its docstring for why.
-    """
+    process_two_folders() instead - see its docstring for why."""
     train_out = os.path.join(train_root, class_name)
     val_out = os.path.join(val_root, class_name)
     os.makedirs(train_out, exist_ok=True)
@@ -204,8 +290,7 @@ def process_two_folders(train_input_dir, val_input_dir, class_name,
                         train_root=config.TRAIN_DIR, val_root=config.VAL_DIR,
                         min_area=config.MIN_BLOB_AREA,
                         expected_per_photo=config.EXPECTED_SHELLS_PER_GRID_PHOTO):
-    """
-    Use this when you've reshuffled/rephotographed the same physical
+    """Use this when you've reshuffled/rephotographed the same physical
     shells for extra pose variety. Random per-photo splitting (see
     process_class) can't safely handle that: if the same 9 physical
     shells are reshuffled and rephotographed 3 times, a random split
