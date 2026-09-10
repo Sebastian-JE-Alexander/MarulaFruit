@@ -42,27 +42,30 @@ def debug_find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_
     more boxes than physical shells actually present. Not used by the
     normal pipeline - purely a diagnostic entry point.
 
+    Mirrors find_blobs()'s downscaled-throughout approach (see that
+    function's docstring) so this diagnostic reflects what production
+    actually does, not an older/slower path.
+
     Returns dict with keys: 'otsu_raw', 'adaptive_raw' (boxes before any
-    merging/dedup, tagged by source) and 'final' (what find_blobs()
-    would actually return).
+    merging/dedup, tagged by source, in FULL-RESOLUTION coordinates) and
+    'final' (what find_blobs() would actually return).
     """
-    masks = {}
-
-    _, mask_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    mask_otsu_inv = cv2.bitwise_not(mask_otsu)
-    masks["otsu"] = mask_otsu if (mask_otsu > 0).sum() < (mask_otsu_inv > 0).sum() else mask_otsu_inv
-
     max_dim = 900
     scale = min(1.0, max_dim / max(gray.shape[:2]))
     small = cv2.resize(gray, None, fx=scale, fy=scale) if scale < 1.0 else gray
-    block_size = _odd(max(int(min(small.shape[:2]) * 0.35), 151))
-    adaptive_small = cv2.adaptiveThreshold(
-        small, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 5)
-    masks["adaptive"] = cv2.resize(adaptive_small, (gray.shape[1], gray.shape[0]),
-                                   interpolation=cv2.INTER_NEAREST)
 
-    k = max(int(min(gray.shape[:2]) * 0.01), 3)
+    masks = {}
+    _, mask_otsu = cv2.threshold(small, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask_otsu_inv = cv2.bitwise_not(mask_otsu)
+    masks["otsu"] = mask_otsu if (mask_otsu > 0).sum() < (mask_otsu_inv > 0).sum() else mask_otsu_inv
+
+    block_size = _odd(max(int(min(small.shape[:2]) * 0.35), 151))
+    masks["adaptive"] = cv2.adaptiveThreshold(
+        small, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 5)
+
+    k = max(int(min(small.shape[:2]) * 0.01), 3)
     kernel = np.ones((k, k), np.uint8)
+    min_area_scaled = min_area * scale * scale
 
     per_method_boxes = {}
     all_boxes = []
@@ -73,12 +76,14 @@ def debug_find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_
         boxes_this_source = []
         for c in contours:
             area = cv2.contourArea(c)
-            if area < min_area:
+            if area < min_area_scaled:
                 continue
             x, y, w, h = cv2.boundingRect(c)
             aspect = max(w, h) / max(min(w, h), 1)
             if aspect > max_aspect:
                 continue
+            if scale < 1.0:
+                x, y, w, h = int(x / scale), int(y / scale), int(w / scale), int(h / scale)
             boxes_this_source.append((x, y, w, h))
             all_boxes.append((x, y, w, h))
         per_method_boxes[source] = boxes_this_source
@@ -108,36 +113,50 @@ def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_A
     lower-contrast objects a global method can miss; Otsu is kept
     because it's typically cleaner/less noisy on the higher-contrast
     cases. Overlapping detections from both methods are de-duplicated.
+
+    PERFORMANCE NOTE: everything (Otsu, adaptive threshold, morphology,
+    contour-finding) runs on a DOWNSCALED copy of the frame - only the
+    final box coordinates get scaled back up to full resolution. An
+    earlier version only downscaled the adaptive threshold's own
+    computation, then resized the result back UP to full resolution
+    before morphology/contours - meaning the expensive per-pixel work
+    (morphology + contour tracing, done twice: once for Otsu's native
+    full-res mask, once for the upscaled adaptive mask) was still
+    happening on ~20 megapixel masks regardless. Measured on a real
+    live-camera setup: this was costing 120-200ms per frame, scaling
+    directly with camera resolution - exactly what you'd expect from
+    full-resolution per-pixel operations. Doing the expensive steps at
+    the small scale and only scaling coordinates (cheap - a handful of
+    numbers, not millions of pixels) at the very end removes that cost
+    almost entirely, without changing the underlying detection logic.
     """
+    max_dim = 900
+    scale = min(1.0, max_dim / max(gray.shape[:2]))
+    small = cv2.resize(gray, None, fx=scale, fy=scale) if scale < 1.0 else gray
+
     masks = []
 
-    _, mask_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, mask_otsu = cv2.threshold(small, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     mask_otsu_inv = cv2.bitwise_not(mask_otsu)
     otsu_fg = mask_otsu if (mask_otsu > 0).sum() < (mask_otsu_inv > 0).sum() else mask_otsu_inv
     masks.append(otsu_fg)
 
     if use_adaptive:
-        # Run adaptive thresholding on a downscaled copy - at full camera
-        # resolution (~5472x3648) with the large block size needed above,
-        # this step alone was taking ~12s/image, far too slow to process
-        # a real batch of photos. Shell locations don't need pixel-perfect
-        # precision (crop_shell adds padding anyway), so detecting at a
-        # smaller scale and mapping boxes back up is a large speedup for
-        # a cost this task doesn't need paid in full resolution.
-        max_dim = 900
-        scale = min(1.0, max_dim / max(gray.shape[:2]))
-        small = cv2.resize(gray, None, fx=scale, fy=scale) if scale < 1.0 else gray
-
         block_size = _odd(max(int(min(small.shape[:2]) * 0.35), 151))
-        adaptive_small = cv2.adaptiveThreshold(
+        adaptive = cv2.adaptiveThreshold(
             small, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
             block_size, 5)
-        adaptive = cv2.resize(adaptive_small, (gray.shape[1], gray.shape[0]),
-                              interpolation=cv2.INTER_NEAREST)
         masks.append(adaptive)
 
-    k = max(int(min(gray.shape[:2]) * 0.01), 3)
+    k = max(int(min(small.shape[:2]) * 0.01), 3)
     kernel = np.ones((k, k), np.uint8)
+
+    # min_area is specified in FULL-RESOLUTION pixel units (tuned
+    # against real ~5472x3648 frames) - since contours are now measured
+    # in the downscaled image, the threshold needs the same scale-down
+    # (area scales with scale^2, not scale) or it would reject
+    # everything at this smaller pixel count.
+    min_area_scaled = min_area * scale * scale
 
     all_boxes = []
     for mask in masks:
@@ -146,12 +165,16 @@ def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_A
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for c in contours:
             area = cv2.contourArea(c)
-            if area < min_area:
+            if area < min_area_scaled:
                 continue
             x, y, w, h = cv2.boundingRect(c)
-            aspect = max(w, h) / max(min(w, h), 1)
+            aspect = max(w, h) / max(min(w, h), 1)  # scale-invariant, fine to check before scaling up
             if aspect > max_aspect:
                 continue
+            # Scale coordinates back to full resolution - cheap (a few
+            # numbers), unlike scaling the mask itself would have been.
+            if scale < 1.0:
+                x, y, w, h = int(x / scale), int(y / scale), int(w / scale), int(h / scale)
             all_boxes.append((x, y, w, h))
 
     boxes = _dedupe_boxes(all_boxes)
