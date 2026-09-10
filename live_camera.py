@@ -42,7 +42,7 @@ from CameraParams_header import *
 
 from detect_and_classify import load_model, process_frame, fuse_pass_fail
 from gui_theme import (FONT_FAMILY, COLOUR_BG, COLOUR_CARD_BG, COLOUR_CARD_BORDER,
-                       COLOUR_TEXT, COLOUR_TEXT_MUTED, COLOUR_VERDICT)
+                       COLOUR_TEXT, COLOUR_TEXT_MUTED, COLOUR_VERDICT, find_logo_path)
 import config
 
 
@@ -143,9 +143,22 @@ class LiveDemoGUI:
 
         header = tk.Frame(root, bg=COLOUR_BG)
         header.pack(fill=tk.X, padx=24, pady=(20, 8))
-        tk.Label(header, text="Marula Shell Classifier", bg=COLOUR_BG, fg=COLOUR_TEXT,
+
+        logo_path = find_logo_path(config)
+        if logo_path:
+            logo_img = Image.open(logo_path)
+            logo_img.thumbnail((220, 80))
+            self.logo_tk = ImageTk.PhotoImage(logo_img)  # kept as self. attr - Tkinter drops it otherwise
+            tk.Label(header, image=self.logo_tk, bg=COLOUR_BG).pack(side=tk.LEFT, padx=(0, 16))
+        else:
+            print(f"No logo found in {config.LOGO_DIR}/ - skipping logo display "
+                  f"(set config.LOGO_PATH explicitly, or add an image to that folder)")
+
+        title_box = tk.Frame(header, bg=COLOUR_BG)
+        title_box.pack(side=tk.LEFT, anchor="w")
+        tk.Label(title_box, text="Marula Shell Classifier", bg=COLOUR_BG, fg=COLOUR_TEXT,
                  font=(FONT_FAMILY, 18, "bold")).pack(anchor="w")
-        tk.Label(header, text="Live demo view", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+        tk.Label(title_box, text="Live demo view", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=(FONT_FAMILY, 10)).pack(anchor="w")
 
         self.verdict_banner = tk.Frame(root, bg=COLOUR_VERDICT["WAITING"])
