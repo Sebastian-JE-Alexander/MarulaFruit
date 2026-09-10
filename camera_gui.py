@@ -18,7 +18,7 @@ import sys
 import time
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 from ctypes import *
 
 import cv2
@@ -41,18 +41,38 @@ from CameraParams_header import *
 from detect_and_classify import load_model, process_frame, fuse_pass_fail
 import config
 
-
 # EXPOSURE_VAL and CAMERA_NAMES now live in config.py - update them
 # there (not here) so this file and any future camera-related script
-# stay in sync automatically.
+# stay in sync automatically. CAMERA_NAMES: update to match your two
+# cameras' actual configured UserDefinedName (set via the MVS client
+# software) - same "CAM_N" convention as cameras.py. Add a third entry
+# there later for the 3-camera setup; nothing in this file assumes
+# exactly two.
+
+# --- Visual design tokens ---------------------------------------------
+# One place for the whole palette/typography - change the look here
+# rather than hunting through layout code. Segoe UI is the standard
+# Windows UI font (this runs on a Windows testing PC); Tkinter silently
+# falls back to a system default if it's ever unavailable, so this stays
+# safe on other platforms too, just less polished-looking there.
+FONT_FAMILY = "Segoe UI"
+COLOUR_BG = "#F4F5F7"  # window background
+COLOUR_CARD_BG = "#FFFFFF"  # camera panel background
+COLOUR_CARD_BORDER = "#E2E4E9"
+COLOUR_TEXT = "#1F2430"
+COLOUR_TEXT_MUTED = "#6B7280"
+COLOUR_ACCENT = "#2563EB"  # primary action colour (Trigger button)
+COLOUR_VERDICT = {
+    "PASS": "#16A34A", "FAIL": "#DC2626", "ERROR": "#EA580C", None: "#9CA3AF",
+}
 
 
 def find_logo_path():
     """
-    Returns config.LOGO_PATH if set, and it exists, otherwise
-    auto-detects the first image file in config.LOGO_DIR.
-    Returns None if nothing is found, so the GUI can skip the
-    logo rather than crashing on startup.
+    Returns config.LOGO_PATH if set and it exists, otherwise
+    auto-detects the first image file in config.LOGO_DIR (your 'logos'
+    folder). Returns None if nothing is found, so the GUI can skip the
+    logo gracefully rather than crashing on startup.
     """
     if config.LOGO_PATH and os.path.isfile(config.LOGO_PATH):
         return config.LOGO_PATH
@@ -70,11 +90,9 @@ def find_logo_path():
 
 
 class CameraController:
-    """
-    One camera connect/trigger/grab/disconnect, identified by
-    UserDefinedName - This UserID is set in MVS so that they are
-    written to the camera.
-    """
+    """One camera's connect/trigger/grab/disconnect, identified by
+    UserDefinedName - adapted from cameras.py's init_all_cameras() for
+    software triggering instead of hardware."""
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
@@ -82,11 +100,9 @@ class CameraController:
         self.exposure = exposure
 
     def connect(self, device_list):
-        """
-        device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
+        """device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
         shared across all cameras being connected so enumeration only
-        happens once per Connect click, not once per camera.
-        """
+        happens once per Connect click, not once per camera."""
         matched_device = None
         for i in range(device_list.nDeviceNum):
             st_device = cast(device_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
@@ -109,9 +125,9 @@ class CameraController:
         if ret != 0:
             raise RuntimeError(f"[{self.user_id}] Open device failed, ret [0x{ret:x}]")
 
-        # ------------------ Trigger config: SOFTWARE --------------------------
-        # For the real integration, switch these two lines to
-        # hardware-trigger config instead:
+        # --- Trigger config: SOFTWARE for this benchtop GUI ---
+        # For the real belt integration, switch these two lines back to
+        # cameras.py's hardware-trigger config instead:
         #   cam.MV_CC_SetEnumValue("TriggerSource", 0)   # Line0
         #   cam.MV_CC_SetEnumValue("TriggerActivation", 0)  # rising edge
         cam.MV_CC_SetEnumValue("TriggerMode", 1)  # 1 = trigger mode on (not free-run)
@@ -126,11 +142,9 @@ class CameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=2000):
-        """
-        Fires the software trigger, retrieves one frame, returns it
+        """Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel).
-        """
+        expects. Assumes Mono8 (1 byte/pixel)."""
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -170,6 +184,10 @@ class ShellSorterGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Marula Shell Classifier - Camera Test")
+        self.root.configure(bg=COLOUR_BG)
+        self.root.minsize(900, 650)
+
+        self._setup_styles()
 
         print("Loading model...")
         self.model, self.device, self.classes = load_model()
@@ -184,38 +202,58 @@ class ShellSorterGUI:
         os.makedirs(config.OUTPUTS_DIR, exist_ok=True)
         os.makedirs(config.CAMERA_CAPTURES_DIR, exist_ok=True)
 
+        # --- Header: logo + title -------------------------------------
+        header = tk.Frame(root, bg=COLOUR_BG)
+        header.pack(fill=tk.X, padx=24, pady=(20, 8))
+
         logo_path = find_logo_path()
         if logo_path:
             logo_img = Image.open(logo_path)
-            logo_img.thumbnail((300, 100))  # header-sized, not overwhelming the window
+            logo_img.thumbnail((220, 80))
             self.logo_tk = ImageTk.PhotoImage(logo_img)  # kept as self. attr - Tkinter drops it otherwise
-            tk.Label(root, image=self.logo_tk).pack(pady=(10, 0))
+            tk.Label(header, image=self.logo_tk, bg=COLOUR_BG).pack(side=tk.LEFT, padx=(0, 16))
         else:
             print(f"No logo found in {config.LOGO_DIR}/ - skipping logo display "
                   f"(set config.LOGO_PATH explicitly, or add an image to that folder)")
 
-        # PASS/FAIL readout - Font/colour set
-        # in show_verdict() based on the result; starts neutral grey
-        # with placeholder text before the first trigger.
-        self.verdict_var = tk.StringVar(value="—")
-        self.verdict_label = tk.Label(root, textvariable=self.verdict_var,
-                                      font=("Arial", 36, "bold"), fg="gray")
-        self.verdict_label.pack(pady=(10, 0))
-        self.verdict_detail_var = tk.StringVar(value="")
-        tk.Label(root, textvariable=self.verdict_detail_var, font=("Arial", 10)).pack()
+        title_box = tk.Frame(header, bg=COLOUR_BG)
+        title_box.pack(side=tk.LEFT, anchor="w")
+        tk.Label(title_box, text="Marula Shell Classifier", bg=COLOUR_BG, fg=COLOUR_TEXT,
+                 font=(FONT_FAMILY, 18, "bold")).pack(anchor="w")
+        tk.Label(title_box, text="Camera test", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+                 font=(FONT_FAMILY, 10)).pack(anchor="w")
 
-        # One column per camera, side by side, each with its own image
-        # and status line - so results can be compared at a glance.
-        columns = tk.Frame(root)
-        columns.pack(padx=10, pady=10)
+        ttk.Separator(root, orient="horizontal").pack(fill=tk.X, padx=24, pady=(4, 0))
+
+        # --- Verdict banner: the main demo output, a full-width coloured
+        # block rather than just coloured text, so it reads clearly from
+        # across a room during a live demo. Colour/text set in
+        # show_verdict(); starts neutral grey before the first trigger.
+        self.verdict_banner = tk.Frame(root, bg=COLOUR_VERDICT[None])
+        self.verdict_banner.pack(fill=tk.X, padx=24, pady=16)
+        self.verdict_var = tk.StringVar(value="—")
+        self.verdict_label = tk.Label(self.verdict_banner, textvariable=self.verdict_var,
+                                      font=(FONT_FAMILY, 34, "bold"),
+                                      fg="white", bg=COLOUR_VERDICT[None])
+        self.verdict_label.pack(pady=(14, 0))
+        self.verdict_detail_var = tk.StringVar(value="Click Trigger to begin")
+        self.verdict_detail_label = tk.Label(self.verdict_banner, textvariable=self.verdict_detail_var,
+                                             font=(FONT_FAMILY, 10), fg="white", bg=COLOUR_VERDICT[None])
+        self.verdict_detail_label.pack(pady=(2, 14))
+
+        # --- One card per camera, side by side ---------------------------
+        columns = tk.Frame(root, bg=COLOUR_BG)
+        columns.pack(padx=24, pady=(0, 8))
 
         self.image_labels = {}
         self.camera_status_vars = {}
         for i, name in enumerate(config.CAMERA_NAMES):
-            col = tk.Frame(columns, padx=10)
-            col.grid(row=0, column=i)
+            card = tk.Frame(columns, bg=COLOUR_CARD_BG, highlightbackground=COLOUR_CARD_BORDER,
+                            highlightthickness=1, padx=14, pady=12)
+            card.grid(row=0, column=i, padx=10)
 
-            tk.Label(col, text=name, font=("Arial", 12, "bold")).pack()
+            tk.Label(card, text=name, bg=COLOUR_CARD_BG, fg=COLOUR_TEXT,
+                     font=(FONT_FAMILY, 13, "bold")).pack(anchor="w", pady=(0, 8))
 
             # NOTE: deliberately no width/height set here - Tkinter
             # measures Label width/height in CHARACTER units while
@@ -223,29 +261,55 @@ class ShellSorterGUI:
             # displayed, so a fixed value meant to size the text
             # placeholder collapses the box the moment an image
             # replaces the text. Auto-sizing avoids that entirely.
-            img_label = tk.Label(col, text="(no image yet)")
+            img_label = tk.Label(card, text="(no image yet)", bg=COLOUR_CARD_BG, fg=COLOUR_TEXT_MUTED,
+                                 font=(FONT_FAMILY, 10))
             img_label.pack()
             self.image_labels[name] = img_label
 
             status_var = tk.StringVar(value="Not connected")
-            tk.Label(col, textvariable=status_var, font=("Arial", 10)).pack()
+            tk.Label(card, textvariable=status_var, bg=COLOUR_CARD_BG, fg=COLOUR_TEXT_MUTED,
+                     font=(FONT_FAMILY, 9), wraplength=280, justify="left").pack(anchor="w", pady=(8, 0))
             self.camera_status_vars[name] = status_var
 
+        # --- Timing (secondary info, deliberately understated) -----------
         self.timing_var = tk.StringVar(value="")
-        tk.Label(root, textvariable=self.timing_var, font=("Arial", 11, "bold")).pack(pady=(5, 0))
+        tk.Label(root, textvariable=self.timing_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+                 font=("Consolas", 9)).pack(pady=(4, 8))
 
-        btn_frame = tk.Frame(root)
-        btn_frame.pack(pady=10)
-        self.connect_btn = tk.Button(btn_frame, text="Connect Cameras", command=self.on_connect)
-        self.connect_btn.pack(side=tk.LEFT, padx=5)
-        self.trigger_btn = tk.Button(btn_frame, text="Trigger", command=self.on_trigger,
-                                     state=tk.DISABLED)
-        self.trigger_btn.pack(side=tk.LEFT, padx=5)
-        self.save_btn = tk.Button(btn_frame, text="Save Capture", command=self.on_save,
-                                  state=tk.DISABLED)
-        self.save_btn.pack(side=tk.LEFT, padx=5)
+        # --- Buttons: Trigger is the primary action, larger and accented;
+        # Connect/Save are secondary --------------------------------------
+        btn_frame = tk.Frame(root, bg=COLOUR_BG)
+        btn_frame.pack(pady=(4, 20))
+        self.connect_btn = ttk.Button(btn_frame, text="Connect Cameras", style="Secondary.TButton",
+                                      command=self.on_connect)
+        self.connect_btn.pack(side=tk.LEFT, padx=6)
+        self.trigger_btn = ttk.Button(btn_frame, text="Trigger", style="Primary.TButton",
+                                      command=self.on_trigger, state=tk.DISABLED)
+        self.trigger_btn.pack(side=tk.LEFT, padx=6)
+        self.save_btn = ttk.Button(btn_frame, text="Save Capture", style="Secondary.TButton",
+                                   command=self.on_save, state=tk.DISABLED)
+        self.save_btn.pack(side=tk.LEFT, padx=6)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _setup_styles(self):
+        """ttk theming - 'clam' gives consistent cross-platform styling
+        (unlike the default theme, which looks noticeably different per
+        OS) that custom colours actually apply cleanly on top of."""
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        style.configure("Primary.TButton", font=(FONT_FAMILY, 11, "bold"),
+                        foreground="white", background=COLOUR_ACCENT,
+                        padding=(18, 10), borderwidth=0)
+        style.map("Primary.TButton",
+                  background=[("disabled", "#A9C2F5"), ("active", "#1D4ED8")])
+
+        style.configure("Secondary.TButton", font=(FONT_FAMILY, 10),
+                        foreground=COLOUR_TEXT, background="#E5E7EB",
+                        padding=(14, 8), borderwidth=0)
+        style.map("Secondary.TButton",
+                  background=[("disabled", "#F3F4F6"), ("active", "#D1D5DB")])
 
     def on_connect(self):
         try:
@@ -260,7 +324,8 @@ class ShellSorterGUI:
             return
 
         # Each camera connects independently, so one failing doesn't
-        # block the other.
+        # block the other - useful when testing with only one camera
+        # plugged in, or debugging which of the two has a problem.
         failures = []
         for name, cam in self.cameras.items():
             try:
@@ -313,7 +378,7 @@ class ShellSorterGUI:
                 # out when (and only when) the Save Capture button is
                 # pressed, so triggering to preview a result doesn't
                 # silently fill up outputs/camera_captures/ with frames
-                # you were just looking at.
+                # you were just looking at, not keeping.
                 self.last_trigger_data[name] = {
                     "raw_frame": frame, "annotated": annotated, "results": results,
                     "grab_ms": grab_ms, "process_ms": process_ms,
@@ -341,10 +406,12 @@ class ShellSorterGUI:
             self.trigger_btn.config(state=tk.NORMAL)
 
     def show_verdict(self, verdict, explanation):
-        colours = {"PASS": "green", "FAIL": "red", "ERROR": "orange"}
+        colour = COLOUR_VERDICT.get(verdict, COLOUR_VERDICT[None])
         self.verdict_var.set(verdict)
-        self.verdict_label.config(fg=colours.get(verdict, "gray"))
         self.verdict_detail_var.set(explanation)
+        self.verdict_banner.config(bg=colour)
+        self.verdict_label.config(bg=colour)
+        self.verdict_detail_label.config(bg=colour)
 
     def on_save(self):
         if not self.last_trigger_data:
@@ -366,12 +433,19 @@ class ShellSorterGUI:
 
     def log_trigger_results(self, trigger_id, camera_name, raw_frame, annotated_frame,
                             results, grab_ms, process_ms):
-        """
-        Saves the raw + annotated frame for this camera/trigger to
+        """Saves the raw + annotated frame for this camera/trigger to
         outputs/camera_captures/, and appends one CSV row per detected
         shell to outputs/camera_results_log.csv (one row with class=""
         if zero shells were found, so a trigger with no detections still
         shows up in the log rather than silently vanishing).
+
+        Two things this is for: reviewing a testing session afterward
+        without having to remember what happened at each click, and
+        building up a pool of real captured frames as candidate future
+        training data - these are genuine camera captures, not curated
+        photos, which is exactly the kind of data this project has
+        repeatedly found itself short of (new backgrounds, new angles,
+        new physical shells).
         """
         raw_path = os.path.join(config.CAMERA_CAPTURES_DIR,
                                 f"{trigger_id}_{camera_name}_raw.png")
@@ -409,7 +483,7 @@ class ShellSorterGUI:
         rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         # real camera frames are ~5472x3648 - shrink for on-screen display,
-        # smaller per-camera since two or more need to fit side by side
+        # smaller per-camera since two need to fit side by side now
         pil_img.thumbnail((650, 500))
         tk_img = ImageTk.PhotoImage(pil_img)
         label = self.image_labels[camera_name]
