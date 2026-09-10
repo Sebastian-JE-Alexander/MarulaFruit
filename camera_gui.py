@@ -72,8 +72,8 @@ def find_logo_path():
 class CameraController:
     """
     One camera connect/trigger/grab/disconnect, identified by
-    UserDefinedName - adapted from cameras.py's init_all_cameras() for
-    software triggering instead of hardware.
+    UserDefinedName - This UserID is set in MVS so that they are
+    written to the camera.
     """
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
@@ -409,7 +409,7 @@ class ShellSorterGUI:
         rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         # real camera frames are ~5472x3648 - shrink for on-screen display,
-        # smaller per-camera since two need to fit side by side now
+        # smaller per-camera since two or more need to fit side by side
         pil_img.thumbnail((650, 500))
         tk_img = ImageTk.PhotoImage(pil_img)
         label = self.image_labels[camera_name]
