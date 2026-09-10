@@ -64,10 +64,10 @@ EXPECTED_SHELLS_PER_GRID_PHOTO = 9
 # ------------------------- Training -------------------------------------------
 BATCH_SIZE = 16
 SEED = 42
-DEFAULT_EPOCHS = 30
+DEFAULT_EPOCHS = 100
 DEFAULT_LR = 1e-3
 DEFAULT_WEIGHT_DECAY = 1e-4
-DEFAULT_PATIENCE = 8
+DEFAULT_PATIENCE = 18
 VAL_FRACTION = 0.2 # for segment_grid_photos.py random-split mode
 
 # ------------------------------ Camera ----------------------------------------
