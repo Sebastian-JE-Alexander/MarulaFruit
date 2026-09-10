@@ -40,6 +40,19 @@ LOGO_PATH = None
 LOGO_DIR = "logos"
 
 
+# ------------------------------------------------------------------------
+# Set True to run inference via ONNX Runtime instead of PyTorch (see
+# model_export.py to create the .onnx file first). ONNX_PROVIDERS lists
+# execution providers in preference order - CUDAExecutionProvider needs
+# onnxruntime-gpu installed AND a working CUDA/cuDNN setup; if it's not
+# actually usable for any reason, ONNX Runtime silently falls back to
+# the next provider in the list rather than raising an error, so
+# load_model() prints which provider actually got selected at startup -
+# always check that printed line rather than assuming GPU is active
+# just because it was requested.
+USE_ONNX = False
+ONNX_PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
 # ---------------------------- Segmentation -------------------------------------
 # Tuned for 5472x3648 pixel camera frames -rescale if camera resolution or distance
 # changes meaningfully

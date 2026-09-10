@@ -24,7 +24,6 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-
 from model import ShellClassifier
 from dataset import build_transform
 from segment_grid_photos import find_blobs, crop_shell
@@ -33,45 +32,95 @@ import config
 
 def load_model(weights_path=config.MODEL_WEIGHTS_PATH,
                classes_path=config.CLASSES_PATH):
+    """
+    Single entry point for both backends - callers (process_frame,
+    camera_gui.py, etc.) never need to know or care which one is active,
+    they just get back (model, device, classes) and pass model/device
+    straight into classify_crop() below, which branches internally on
+    the same config.USE_ONNX flag.
+    """
+    if config.USE_ONNX:
+        return _load_onnx_model()
+    return _load_pytorch_model(weights_path, classes_path)
+
+
+def _load_pytorch_model(weights_path, classes_path):
     with open(classes_path) as f:
         classes = f.read().strip().split("\n")
 
-    missing = [c for c in classes if c not in config.CLASS_COLOURS]
-    if missing:
-        print(f"WARNING: no CLASS_COLOURS entry in config.py for class(es) {missing} - "
-              f"they'll draw as the default colour {config.DEFAULT_COLOUR}. "
-              f"Add them to the COLOURS dict at the top of this file if "
-              f"you want them visually distinct.")
+    _warn_if_missing_colours(classes)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ShellClassifier(img_size=128, num_classes=len(classes)).to(device)
+    model = ShellClassifier(img_size=config.IMG_SIZE, num_classes=len(classes)).to(device)
     model.load_state_dict(torch.load(weights_path, map_location=device))
     model.eval()
     return model, device, classes
 
 
+def _load_onnx_model():
+    import onnxruntime as ort
+
+    with open(config.ONNX_CLASSES_PATH) as f:
+        classes = f.read().strip().split("\n")
+
+    _warn_if_missing_colours(classes)
+    session = ort.InferenceSession(config.ONNX_MODEL_PATH, providers=config.ONNX_PROVIDERS)
+    input_name = session.get_inputs()[0].name
+
+    active_providers = session.get_providers()
+    print(f"ONNX Runtime active provider(s): {active_providers}")
+    if "CUDAExecutionProvider" in config.ONNX_PROVIDERS and \
+            "CUDAExecutionProvider" not in active_providers:
+        print("WARNING: CUDAExecutionProvider was requested in config.ONNX_PROVIDERS "
+              "but is NOT active - silently running on CPU instead. Check that "
+              "onnxruntime-gpu (not plain onnxruntime) is installed and that your "
+              "CUDA/cuDNN versions match what this onnxruntime-gpu build expects.")
+
+    return (session, input_name), None, classes  # device kept as None - ONNX Runtime
+    # manages its own execution device
+
+
+def _warn_if_missing_colours(classes):
+    missing = [c for c in classes if c not in config.CLASS_COLOURS]
+    if missing:
+        print(f"WARNING: no CLASS_COLOURS entry in config.py for class(es) {missing} - "
+              f"they'll draw as the default colour {config.DEFAULT_COLOUR}. "
+              f"Add them to the CLASS_COLOURS dict in config.py if "
+              f"you want them visually distinct.")
+
+
 def classify_crop(model, device, crop_gray, classes):
     """
     crop_gray: (H,W) uint8 numpy array. Returns (class_name, confidence, ms).
+    Branches on config.USE_ONNX to match whichever backend load_model()
+    actually loaded - model/device are whatever load_model() returned,
+    unchanged, so this only needs to know how to use each shape.
     """
     img = Image.fromarray(crop_gray)
-    x = build_transform(augment=False)(img).unsqueeze(0).to(device)
+    x = build_transform(augment=False)(img).unsqueeze(0)
 
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    start = time.perf_counter()
-    with torch.no_grad():
-        probs = F.softmax(model(x), dim=1)[0]
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    ms = (time.perf_counter() - start) * 1000
+    if config.USE_ONNX:
+        session, input_name = model
+        start = time.perf_counter()
+        logits = session.run(None, {input_name: x.numpy()})[0]
+        probs = torch.softmax(torch.tensor(logits), dim=1)[0]
+        ms = (time.perf_counter() - start) * 1000
+    else:
+        x = x.to(device)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        start = time.perf_counter()
+        with torch.no_grad():
+            probs = F.softmax(model(x), dim=1)[0]
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        ms = (time.perf_counter() - start) * 1000
 
     idx = int(probs.argmax())
     return classes[idx], float(probs[idx]), ms
 
 
 def process_frame(gray, model, device, classes, min_area=config.MIN_BLOB_AREA):
-    """
-    Core pipeline on an in-memory (H,W) grayscale numpy array - no disk
+    """Core pipeline on an in-memory (H,W) grayscale numpy array - no disk
     I/O. This is what camera_gui.py calls directly on a live-grabbed
     frame; detect_and_classify() below wraps this for the file-based CLI
     usage, so both share exactly one implementation rather than drifting
@@ -123,9 +172,9 @@ def detect_and_classify(image_path, model, device, classes, output_path=None,
 
 
 def fuse_pass_fail(camera_results):
-    """
-    Combines single-shell results from multiple camera angles into
-    one PASS/FAIL verdict.
+    """Combines single-shell results from multiple camera angles into
+    one PASS/FAIL verdict, for the "one shell at a time, multiple
+    camera angles" demo setup.
 
     camera_results: dict of camera_name -> list of shell-result dicts
     (each with 'class'/'confidence'), i.e. process_frame()'s `results`
@@ -133,15 +182,19 @@ def fuse_pass_fail(camera_results):
 
     Rule: FAIL if ANY camera calls it 'bad'. PASS only if EVERY camera
     that saw the shell called it 'good'. Deliberately NOT a confidence
-    average across cameras. The whole point of a second camera
+    average across cameras - the customer explicitly said missing/open
+    eyelid shells are "particularly important... to remove", meaning a
+    missed defect (false negative) costs more than a wrongly-rejected
+    good shell (false positive). The whole point of a second camera
     angle is catching a defect that's only visible from one side -
     averaging a clear detection from one camera against a "can't see
     anything wrong from here" read from the other would dilute exactly
-    the signal the second camera exists to provide. Plain OR logic that
-    is biased towards the 'bad' class.
+    the signal the second camera exists to provide. A plain OR toward
+    'bad' preserves it instead.
 
     Returns (verdict, explanation, per_camera_summary):
       verdict: "PASS", "FAIL", or "ERROR" (wrong shell count in some camera)
+      explanation: one-line human-readable reason, good for display
       per_camera_summary: {camera_name: single result dict}, cameras
         with a valid single-shell read only
     """
@@ -158,7 +211,7 @@ def fuse_pass_fail(camera_results):
         return "ERROR", "; ".join(problems), per_camera_summary
 
     if not per_camera_summary:
-        return "ERROR", "No camera results to check", per_camera_summary
+        return "ERROR", "No camera results to fuse", per_camera_summary
 
     bad_cams = [name for name, r in per_camera_summary.items() if r["class"] == "bad"]
 
@@ -168,7 +221,7 @@ def fuse_pass_fail(camera_results):
         return "FAIL", f"bad detected by: {detail}", per_camera_summary
 
     detail = ", ".join(f"{name} ({r['confidence']:.0%})" for name, r in per_camera_summary.items())
-    return "PASS", f"all cameras predict good: {detail}", per_camera_summary
+    return "PASS", f"all camera(s) agree good: {detail}", per_camera_summary
 
 
 if __name__ == "__main__":
