@@ -274,13 +274,13 @@ class LiveDemoGUI:
         if not self.running:
             return
 
-        # frame-to-frame time - from the start of THIS loop back to
+        # frame-to-frame time - from the start of this loop back to
         # the start of the PREVIOUS one. This is what a person actually
         # perceives as the frame rate: work time PLUS the deliberate
         # config.LIVE_POLL_INTERVAL_MS delay after it. Reporting only the
         # work time (as an earlier version of this did) understates the
         # real interval and hides whether the delay or the work is
-        # actually the bottleneck - see chat message.
+        # actually the bottleneck.
         now = time.perf_counter()
         true_frame_ms = (now - self._last_frame_time) * 1000 if self._last_frame_time else None
         self._last_frame_time = now
@@ -318,13 +318,13 @@ class LiveDemoGUI:
 
     def _update_verdict(self, camera_results):
         # No shells anywhere = nothing placed yet - the normal resting
-        # state through most of a live demo, not an error. Different
+        # state through most of a live screen, not an error. Different
         # handling from camera_gui.py's trigger flow deliberately: there,
         # a 0-shell result from an actual button press IS meaningful (a
-        # misfire worth flagging); here, it's just "waiting."
+        # misfire worth flagging); here, it's just IDLE.
         if not camera_results or all(len(r) == 0 for r in camera_results.values()):
             self._set_verdict("WAITING", "Place a shell to begin")
-            # Belt is clear - reset so the NEXT shell placed counts as a
+            # area is clear - reset so the NEXT shell placed counts as a
             # fresh entry, not a continuation of whatever was counted before.
             self._counted_this_presence = False
             return

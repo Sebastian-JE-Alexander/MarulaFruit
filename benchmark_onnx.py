@@ -4,7 +4,7 @@ Compares PyTorch vs ONNX Runtime inference time on the same real
 images, using IDENTICAL preprocessing for both (build_transform() -
 same function the normal pipeline uses) so the timing comparison is
 real. Only the "run the model" step actually differs
-between the two - everything else is shared code.
+between the two everything else is shared.
 
 Usage: python benchmark_onnx.py path/to/image.png [path/to/another.png ...]
 ----------------------------------------------------------------------------
@@ -24,6 +24,9 @@ from dataset import build_transform
 
 
 def load_onnx_session(onnx_path=config.ONNX_MODEL_PATH):
+    """
+    starts the ONNX session using ONNX runtime and points to the model files location.
+    """
     session = ort.InferenceSession(onnx_path)
     input_name = session.get_inputs()[0].name
     return session, input_name

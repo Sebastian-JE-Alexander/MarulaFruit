@@ -111,9 +111,11 @@ class CameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=2000):
-        """Fires the software trigger, retrieves one frame, returns it
+        """
+        Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel)."""
+        expects. Assumes Mono8 (1 byte/pixel).
+        """
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 

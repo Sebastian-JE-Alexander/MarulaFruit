@@ -3,7 +3,7 @@
 Run this against a captured image where a single physical shell got detected as two
 bounding boxes. Draws every candidate box BEFORE deduplication is applied, then colour
 codes them by which method found it (Otsu vs Adaptive), plus the final boxes that actually
-returned. This helps identify which method is responsible and what its picking up.
+returned. This helps identify which method is responsible and what it's picking up.
 
 Usage: python diagnose_double_detection.py path/to/image.png
 ------------------------------------------------------------------------------------------
@@ -19,7 +19,10 @@ COLOURS = {"otsu": (0, 165, 255), "adaptive": (255, 0, 255), "final": (0, 255, 0
 
 def diagnose(image_path, output_path=None, min_area=None):
     img = cv2.imread(image_path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    if img.ndim == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
 
     kwargs = {"min_area": min_area} if min_area else {}
     result = debug_find_blobs(gray, **kwargs)
@@ -47,7 +50,7 @@ def diagnose(image_path, output_path=None, min_area=None):
 
     legend_y = 30
     for label, colour in [("Otsu (orange)", COLOURS["otsu"]),
-                          ("Adaptive (magneta)", COLOURS["adaptive"]),
+                          ("Adaptive (magenta)", COLOURS["adaptive"]),
                           ("Final (green)", COLOURS["final"])]:
         cv2.putText(annotated, label, (10, legend_y), cv2.FONT_HERSHEY_SIMPLEX,0.8, colour, 2)
         legend_y += 30

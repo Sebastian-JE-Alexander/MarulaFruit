@@ -34,9 +34,9 @@ COLOUR_VERDICT = {
 def find_logo_path(config):
     """
     Returns config.LOGO_PATH if set, and it exists, otherwise
-    auto-detects the first image file in config.LOGO_DIR (your 'logos'
-    folder). Returns None if nothing is found, so a GUI can skip the
-    logo gracefully rather than crashing on startup. Takes config as a
+    auto-detects the first image file in config.LOGO_DIR
+    Returns None if nothing is found, so a GUI can skip the
+    logo rather than crashing on startup. Takes config as a
     parameter rather than importing it directly, to avoid a circular
     import between this module and config.py.
     """

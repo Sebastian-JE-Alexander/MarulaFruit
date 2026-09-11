@@ -26,6 +26,8 @@ from model import ShellClassifier
 from dataset import make_loader
 import config
 
+global ax_metrics
+
 
 def set_seed(seed=config.SEED):
     """
@@ -309,6 +311,7 @@ def plot_history(history):
 
 
 def plot_confusion_matrix(model, val_loader, device, classes):
+    global ax_metrics
     model.eval()
     y_true, y_pred = [], []
     with torch.no_grad():
@@ -330,6 +333,7 @@ def plot_confusion_matrix(model, val_loader, device, classes):
     # (that needs one-vs-rest per class instead). Skip it automatically
     # if this project grows past good/bad, rather than showing something
     # misleading.
+    #
     show_metrics = metrics is not None
 
     if show_metrics:
