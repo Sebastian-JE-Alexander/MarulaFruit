@@ -6,6 +6,7 @@ This means we are pulling our model out of our dynamic python training
 environment and into a stable production environment.
 
 Usage: python model_export.py
+--------------------------------------------------------------------------
 """
 
 import numpy as np

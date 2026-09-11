@@ -1,19 +1,13 @@
 """
-benchmark_onnx.py
+--------------------------- benchmark_onnx.py ----------------------------
 Compares PyTorch vs ONNX Runtime inference time on the same real
-image(s), using IDENTICAL preprocessing for both (build_transform() -
-same function your normal pipeline uses) so the timing comparison is
-apples-to-apples. Only the "run the model" step actually differs
+images, using IDENTICAL preprocessing for both (build_transform() -
+same function the normal pipeline uses) so the timing comparison is
+real. Only the "run the model" step actually differs
 between the two - everything else is shared code.
 
-This also doubles as a demonstration of how little changes to swap
-ONNX into the live pipeline (camera_gui.py / detect_and_classify.py)
-if the numbers below make that worth doing: load an onnxruntime
-InferenceSession once (like load_model() does for PyTorch), then in
-place of `model(x)` call `session.run(None, {input_name: x.numpy()})[0]`.
-Preprocessing, segmentation, and everything else stays untouched.
-
 Usage: python benchmark_onnx.py path/to/image.png [path/to/another.png ...]
+----------------------------------------------------------------------------
 """
 
 import argparse

@@ -1,5 +1,5 @@
 """
-live_camera.py
+--------------------------- live_camera.py ---------------------------
 Live demo view: continuously streams frames from both cameras and runs
 segmentation + classification on every frame.
 
@@ -20,6 +20,7 @@ result seen here means the same thing it would in camera_gui.py.
 
 
 Usage: python live_camera.py
+-----------------------------------------------------------------------
 """
 
 import os
@@ -47,9 +48,11 @@ import config
 
 
 class LiveCameraController:
-    """Free-run (continuous) camera acquisition - deliberately NOT
+    """
+    Free-run (continuous) camera acquisition - deliberately NOT
     software-triggered like camera_gui.py's CameraController. See
-    module docstring for why this needs to be different."""
+    module docstring for why this needs to be different.
+    """
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
@@ -90,11 +93,13 @@ class LiveCameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=500):
-        """No software trigger command needed - the camera is already
+        """
+        No software trigger command needed - the camera is already
         streaming continuously, this just pulls whatever the next
         available frame is. Returns None (not an error) if a frame
         isn't ready within the timeout - normal in free-run mode,
-        just try again next poll."""
+        just try again next poll.
+        """
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -240,7 +245,7 @@ class LiveDemoGUI:
         self.running = True
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-        self._last_frame_time = None  # tracks true wall-clock time between frames, set on first _loop() call
+        self._last_frame_time = None  # tracks clock time between frames, set on first _loop() call
         self._loop()
 
     def on_stop(self):
@@ -261,10 +266,7 @@ class LiveDemoGUI:
         # True frame-to-frame time - from the start of THIS loop back to
         # the start of the PREVIOUS one. This is what a person actually
         # perceives as the frame rate: work time PLUS the deliberate
-        # config.LIVE_POLL_INTERVAL_MS delay after it. Reporting only the
-        # work time (as an earlier version of this did) understates the
-        # real interval and hides whether the delay or the work is
-        # actually the bottleneck - see chat message.
+        # config.LIVE_POLL_INTERVAL_MS delay after it.
         now = time.perf_counter()
         true_frame_ms = (now - self._last_frame_time) * 1000 if self._last_frame_time else None
         self._last_frame_time = now

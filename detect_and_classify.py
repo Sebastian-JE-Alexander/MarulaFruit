@@ -7,9 +7,6 @@ bounding box. The classifier itself only ever sees one cropped
 shell at a time; this script is the layer that finds however many
 shells are in a frame and hands each one to the classifier separately.
 
-NOTE: When specifying colours for classes in the dict, remember that OpenCv uses
-      BGR order not the standard RGB.
-
 
 Usage: python detect_and_classify.py path/to/image.png
 ------------------------------------------------------------------------------------------
@@ -23,6 +20,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
+import onnxruntime as ort
 
 from model import ShellClassifier
 from dataset import build_transform
@@ -57,7 +55,6 @@ def _load_pytorch_model(weights_path, classes_path):
 
 
 def _load_onnx_model():
-    import onnxruntime as ort
 
     with open(config.ONNX_CLASSES_PATH) as f:
         classes = f.read().strip().split("\n")
@@ -120,7 +117,8 @@ def classify_crop(model, device, crop_gray, classes):
 
 
 def process_frame(gray, model, device, classes, min_area=config.MIN_BLOB_AREA):
-    """Core pipeline on an in-memory (H,W) grayscale numpy array - no disk
+    """
+    Core pipeline on an in-memory (H,W) grayscale numpy array - no disk
     I/O. This is what camera_gui.py calls directly on a live-grabbed
     frame; detect_and_classify() below wraps this for the file-based CLI
     usage, so both share exactly one implementation rather than drifting
@@ -172,7 +170,8 @@ def detect_and_classify(image_path, model, device, classes, output_path=None,
 
 
 def fuse_pass_fail(camera_results):
-    """Combines single-shell results from multiple camera angles into
+    """
+    Combines single-shell results from multiple camera angles into
     one PASS/FAIL verdict, for the "one shell at a time, multiple
     camera angles" demo setup.
 

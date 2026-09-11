@@ -5,13 +5,14 @@ Shared visual design tokens for every GUI script in this project
 place so multiple GUI scripts can't drift
 into slightly different colours over time - same reasoning as
 config.py centralizing the non-visual constants.
+---------------------------------------------------------------------
 """
 
 import os
 import glob
 
-FONT_FAMILY = "Segoe UI"  # standard Windows UI font (this runs on a Windows testing
-# PC); Tkinter silently falls back to a system default if
+FONT_FAMILY = "Segoe UI"  # standard Windows UI font
+# Tkinter silently falls back to a system default if
 # ever unavailable, so this stays safe on other platforms too
 
 COLOUR_BG = "#F4F5F7"  # window background

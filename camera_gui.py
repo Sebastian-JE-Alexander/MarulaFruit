@@ -1,14 +1,15 @@
 """
 -------------------------------- camera_gui.py ------------------------------------------
-Connect up to two cameras, click trigger and see each camera's annotated result. Also
+Connect cameras, click trigger and see each camera's annotated result. Also
 includes timing per camera and a combined time.
 
 Cameras are identified by their configured UserDefinedName (CAM_1, CAM_2,...) rather
-than based on a random enumeration order, so that the physical cameras stay consistent
+than based on a random MVS enumeration order, so that the physical cameras stay consistent
 across runs regardless if they get unplugged or any network errors occur. Update
-CAMERA_NAMES to match the user ID's set for the cameras in MVS.
+CAMERA_NAMES in config.py to match the user ID's set for the cameras in MVS.
 
 Usage: python camera_gui.py
+------------------------------------------------------------------------------------------
 """
 
 import csv
@@ -66,9 +67,11 @@ class CameraController:
         self.exposure = exposure
 
     def connect(self, device_list):
-        """device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
+        """
+        device_list: an already-enumerated MV_CC_DEVICE_INFO_LIST,
         shared across all cameras being connected so enumeration only
-        happens once per Connect click, not once per camera."""
+        happens once per Connect click, not once per camera.
+        """
         matched_device = None
         for i in range(device_list.nDeviceNum):
             st_device = cast(device_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
@@ -108,9 +111,11 @@ class CameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=2000):
-        """Fires the software trigger, retrieves one frame, returns it
+        """
+        Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel)."""
+        expects. Assumes Mono8 (1 byte/pixel).
+        """
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -191,9 +196,9 @@ class ShellSorterGUI:
 
         ttk.Separator(root, orient="horizontal").pack(fill=tk.X, padx=24, pady=(4, 0))
 
-        # --- Verdict banner: the main demo output, a full-width coloured
-        # block rather than just coloured text, so it reads clearly from
-        # across a room during a live demo. Colour/text set in
+        # Verdict banner: the main demo output, a full-width coloured
+        # block rather than just coloured text, so it reads clearly
+        # during a live demo. Colour/text set in
         # show_verdict(); starts neutral grey before the first trigger.
         self.verdict_banner = tk.Frame(root, bg=COLOUR_VERDICT[None])
         self.verdict_banner.pack(fill=tk.X, padx=24, pady=16)
@@ -207,7 +212,7 @@ class ShellSorterGUI:
                                              font=(FONT_FAMILY, 10), fg="white", bg=COLOUR_VERDICT[None])
         self.verdict_detail_label.pack(pady=(2, 14))
 
-        # --- One card per camera, side by side ---------------------------
+        # ------------------ One card per camera, side by side ---------------------------
         columns = tk.Frame(root, bg=COLOUR_BG)
         columns.pack(padx=24, pady=(0, 8))
 
@@ -237,13 +242,13 @@ class ShellSorterGUI:
                      font=(FONT_FAMILY, 9), wraplength=280, justify="left").pack(anchor="w", pady=(8, 0))
             self.camera_status_vars[name] = status_var
 
-        # --- Timing (secondary info, deliberately understated) -----------
+        # -------- Timing (secondary info, deliberately understated) -----------
         self.timing_var = tk.StringVar(value="")
         tk.Label(root, textvariable=self.timing_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=("Consolas", 9)).pack(pady=(4, 8))
 
-        # --- Buttons: Trigger is the primary action, larger and accented;
-        # Connect/Save are secondary --------------------------------------
+        # Buttons: Trigger is the primary action;
+        # Connect/Save are secondary
         btn_frame = tk.Frame(root, bg=COLOUR_BG)
         btn_frame.pack(pady=(4, 20))
         self.connect_btn = ttk.Button(btn_frame, text="Connect Cameras", style="Secondary.TButton",
@@ -259,9 +264,11 @@ class ShellSorterGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _setup_styles(self):
-        """ttk theming - 'clam' gives consistent cross-platform styling
+        """
+        ttk theming - 'clam' gives consistent cross-platform styling
         (unlike the default theme, which looks noticeably different per
-        OS) that custom colours actually apply cleanly on top of."""
+        OS) that custom colours actually apply cleanly on top of.
+        """
         style = ttk.Style()
         style.theme_use("clam")
 
@@ -442,7 +449,7 @@ class ShellSorterGUI:
         rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         # real camera frames are ~5472x3648 - shrink for on-screen display,
-        # smaller per-camera since two need to fit side by side now
+        # smaller per-camera since they need to fit side by side.
         pil_img.thumbnail((650, 500))
         tk_img = ImageTk.PhotoImage(pil_img)
         label = self.image_labels[camera_name]

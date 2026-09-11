@@ -4,7 +4,7 @@
 Splits 3x3 grid photos of ONE class into individual shell crops, using
 Otsu-based segmentation.
 Saves into dataset_images/train/<class_name>/ and dataset_images/validation/<class_name>/,
-matching the folder-per-class structure dataset_images.py's ImageFolder
+matching the folder-per-class structure dataset.py's ImageFolder
 expects.
 
 Run this once per class.
@@ -17,8 +17,8 @@ any photos are reshuffled/rephotographed shots of the same physical
 shells, keeping whole photos on one side of the split guarantees no
 crossover between validation and training images.
 
-To run a test segmentation to see how your images came out, run this command in the terminal:
 
+Usage:
 python segment_grid_photos.py --input_dir raw_imgs/train/good --val_input_dir raw_imgs/validation/good --class_name good
 python segment_grid_photos.py --input_dir raw_imgs/train/bad --val_input_dir raw_imgs/validation/bad --class_name bad
 --------------------------------------------------------------------------------------------
@@ -36,7 +36,8 @@ import config
 
 
 def debug_find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_ASPECT):
-    """Same detection as find_blobs(), but returns which method (otsu or
+    """
+    Same detection as find_blobs(), but returns which method (otsu or
     adaptive) produced each surviving box, and the boxes BEFORE
     deduplication too - for diagnosing exactly why a real frame produces
     more boxes than physical shells actually present. Not used by the
@@ -96,15 +97,10 @@ def debug_find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_
 
 def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_ASPECT,
                use_adaptive=True):
-    """Otsu's method finds ONE global foreground/background split for
+    """
+    Otsu's method finds ONE global foreground/background split for
     the whole image - this works well when all objects in frame have
-    similar contrast against the background (true for the 79 single-class
-    grid photos this was built against), but testing against a frame
-    with BOTH a high-contrast shell (near-black, ~45) and a moderate-
-    contrast shell (~150) against a ~206 background found that a single
-    global threshold can catch the high-contrast object while missing
-    the moderate-contrast one entirely - exactly the scenario a mixed-
-    class frame (good + bad shells together) could hit in production.
+    similar contrast against the background.
 
     Fix: also run adaptive thresholding (a local threshold computed per
     neighbourhood, not one global value) and merge its detections with
@@ -124,10 +120,8 @@ def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_A
     full-res mask, once for the upscaled adaptive mask) was still
     happening on ~20 megapixel masks regardless. Measured on a real
     live-camera setup: this was costing 120-200ms per frame, scaling
-    directly with camera resolution - exactly what you'd expect from
-    full-resolution per-pixel operations. Doing the expensive steps at
-    the small scale and only scaling coordinates (cheap - a handful of
-    numbers, not millions of pixels) at the very end removes that cost
+    directly with camera resolution. Doing the expensive steps at
+    the small scale and only scaling coordinates at the very end removes that cost
     almost entirely, without changing the underlying detection logic.
     """
     max_dim = 900
@@ -151,8 +145,8 @@ def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_A
     k = max(int(min(small.shape[:2]) * 0.01), 3)
     kernel = np.ones((k, k), np.uint8)
 
-    # min_area is specified in FULL-RESOLUTION pixel units (tuned
-    # against real ~5472x3648 frames) - since contours are now measured
+    # min_area is specified in FULL-RESOLUTION pixel units -
+    # since contours are now measured
     # in the downscaled image, the threshold needs the same scale-down
     # (area scales with scale^2, not scale) or it would reject
     # everything at this smaller pixel count.
@@ -182,7 +176,8 @@ def find_blobs(gray, min_area=config.MIN_BLOB_AREA, max_aspect=config.MAX_BLOB_A
 
 
 def _reject_size_outliers(boxes, min_fraction_of_median=0.35):
-    """Rejects blobs much smaller than the median blob size in this
+    """
+    Rejects blobs much smaller than the median blob size in this
     image - real shells in one photo should all be roughly consistent
     size, so a blob at a fraction of that size is far more likely to be
     a small artifact (a shadow, a lighting speck near the frame edge)
@@ -203,16 +198,16 @@ def _odd(n):
 
 
 def _dedupe_boxes(boxes, iou_threshold=0.5, containment_threshold=0.7):
-    """Removes duplicate detections of the same shell found by both
+    """
+    Removes duplicate detections of the same shell found by both
     Otsu and adaptive thresholding, keeping the larger (usually
     tighter/more complete) box of any overlapping pair.
 
-    Two separate checks, not just IOU: real frames (see chat - two
-    actual double-detection cases diagnosed with diagnose_double_detection.py)
+    Two separate checks, not just IOU (intersection over union): real frames
     showed a smaller box sitting almost entirely INSIDE a larger one
     (adaptive catching the whole shell, Otsu catching a sub-region of
     it, or vice versa) with IOU of only 0.19 and 0.38 - both well under
-    the 0.5 threshold, so pure IOU-based dedup never caught either one.
+    the 0.5 threshold, so pure IOU-based deduplication never caught either one.
     This isn't a threshold-tuning problem: a small box fully contained
     in a big one structurally has low IOU regardless of threshold,
     because the union stays dominated by the big box's area. Containment
@@ -235,12 +230,14 @@ def _dedupe_boxes(boxes, iou_threshold=0.5, containment_threshold=0.7):
 
 
 def _containment_fraction(small, big):
-    """What fraction of `small`'s area overlaps with `big` - 1.0 means
+    """
+    What fraction of small area overlaps with big - 1.0 means
     small sits entirely inside big. Order-independent in effect since
     _dedupe_boxes always calls this with the box being considered as
-    `small` (boxes are processed largest-first, so anything already in
-    `kept` is >= box in area - this checks how much of the new,
-    smaller-or-equal box is swallowed by what's already kept)."""
+    small (boxes are processed largest-first, so anything already in
+    kept is >= box in area) - this checks how much of the new,
+    smaller-or-equal box is lost by what's already kept.
+    """
     sx0, sy0, sw, sh = small
     bx0, by0, bw, bh = big
     sx1, sy1 = sx0 + sw, sy0 + sh
@@ -283,11 +280,15 @@ def process_class(input_dir, class_name, train_root=config.TRAIN_DIR,
                   val_root=config.VAL_DIR, val_fraction=config.VAL_FRACTION,
                   seed=config.SEED, min_area=config.MIN_BLOB_AREA,
                   expected_per_photo=config.EXPECTED_SHELLS_PER_GRID_PHOTO):
-    """Random photo-level split - ONLY safe when every photo in input_dir
+    """
+    Random photo-level split - ONLY safe when every photo in input_dir
     shows genuinely independent physical shells never repeated in any
     other photo (no reshuffling/rephotographing the same batch). If
     you're reshuffling the same shells for extra pose variety, use
-    process_two_folders() instead - see its docstring for why."""
+    process_two_folders() instead - see its docstring for why.
+
+    This function has been depreciated but kept here as an example.
+    """
     train_out = os.path.join(train_root, class_name)
     val_out = os.path.join(val_root, class_name)
     os.makedirs(train_out, exist_ok=True)
@@ -313,7 +314,8 @@ def process_two_folders(train_input_dir, val_input_dir, class_name,
                         train_root=config.TRAIN_DIR, val_root=config.VAL_DIR,
                         min_area=config.MIN_BLOB_AREA,
                         expected_per_photo=config.EXPECTED_SHELLS_PER_GRID_PHOTO):
-    """Use this when you've reshuffled/rephotographed the same physical
+    """
+    Use this when you've reshuffled/rephotographed the same physical
     shells for extra pose variety. Random per-photo splitting (see
     process_class) can't safely handle that: if the same 9 physical
     shells are reshuffled and rephotographed 3 times, a random split
@@ -328,6 +330,12 @@ def process_two_folders(train_input_dir, val_input_dir, class_name,
     in two separate folders from the start. This function then just
     processes each folder independently - no random splitting, because
     the separation already happened physically, at capture time.
+
+    Set up your raw images folder into train/valid subfolders with their
+    own class folders within each containing the relevant images.
+    This means the function just has to be pointed at the top folder path for
+    it to process through it (see usage note in the docstring at the top of this
+    script.)
     """
     train_out = os.path.join(train_root, class_name)
     val_out = os.path.join(val_root, class_name)
