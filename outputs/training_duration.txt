@@ -1,7 +1,7 @@
 device: cuda
-epochs_run: 63
-total_seconds: 223.82
-total_duration: 3:43.82
-avg_seconds_per_epoch: 3.54
-n_train_images: 1353
-n_val_images: 320
+epochs_run: 79
+total_seconds: 273.77
+total_duration: 4:33.77
+avg_seconds_per_epoch: 3.46
+n_train_images: 1343
+n_val_images: 318

@@ -4,8 +4,6 @@
 Single source of for constants used across the project.
 
 Importing from here means changing a value once actually changes it everywhere.
-Any new constants made for new scripts should try to ensure that they pull their
-reference from here.
 -------------------------------------------------------------------------------
 """
 
@@ -42,7 +40,7 @@ LOGO_PATH = None
 LOGO_DIR = "logos"
 
 
-# ------------------------ Switch to ONNX ---------------------------
+# ------------------------------------------------------------------------
 # Set True to run inference via ONNX Runtime instead of PyTorch (see
 # model_export.py to create the .onnx file first). ONNX_PROVIDERS lists
 # execution providers in preference order - CUDAExecutionProvider needs
@@ -66,24 +64,22 @@ EXPECTED_SHELLS_PER_GRID_PHOTO = 9
 # ------------------------- Training -------------------------------------------
 BATCH_SIZE = 16
 SEED = 42
-DEFAULT_EPOCHS = 30
+DEFAULT_EPOCHS = 100
 DEFAULT_LR = 1e-3
 DEFAULT_WEIGHT_DECAY = 1e-4
-DEFAULT_PATIENCE = 8
+DEFAULT_PATIENCE = 18
 VAL_FRACTION = 0.2 # for segment_grid_photos.py random-split mode
 
 # ------------------------------ Camera ----------------------------------------
 EXPOSURE_VAL = 172025.0
-CAMERA_NAMES = ["CAM_1", "CAM_2"] #adjust camera count by adding user_id set in MVS here.
+CAMERA_NAMES = ["CAM_1", "CAM_3"] #adjust camera count by adding user_id set in MVS here.
 
-# How often live_camera.py grabs+classifies a new frame. Lower = more
-# responsive but more CPU/GPU load. 400ms (~2.5fps), 50ms (~4.5fps).
-# Note that there is a lower limit that will be reached where no
-# gains in fps occur due to other overheads.
+# How often live_camera.py grabs+classifies a new frame - lower = more
+# responsive but more CPU/GPU load. 400ms (~2.5fps)
 LIVE_POLL_INTERVAL_MS = 50
 
 # ---------------------------- Display Colours --------------------------------
-# BGR - OpenCV's channel order, not RGB (VERY IMPORTANT TO REMEMBER)
+# BGR - OpenCV's channel order, not RGB
 CLASS_COLOURS = {
     "good": (0, 200, 0),
     "bad": (0, 0, 255)
