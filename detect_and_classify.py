@@ -43,6 +43,9 @@ def load_model(weights_path=config.MODEL_WEIGHTS_PATH,
 
 
 def _load_pytorch_model(weights_path, classes_path):
+    """
+    Loads the normal pytorch model that is created with train.py for inference.
+    """
     with open(classes_path) as f:
         classes = f.read().strip().split("\n")
 
@@ -55,6 +58,10 @@ def _load_pytorch_model(weights_path, classes_path):
 
 
 def _load_onnx_model():
+    """
+    Loads the generated ONNX model stored within the project outputs folder.
+    An ONNX model must first be generated using model_export.py
+    """
 
     with open(config.ONNX_CLASSES_PATH) as f:
         classes = f.read().strip().split("\n")
@@ -77,6 +84,10 @@ def _load_onnx_model():
 
 
 def _warn_if_missing_colours(classes):
+    """
+    Checks if a new class for detection was declared but not assigned
+    a colour in the dict found in config.py
+    """
     missing = [c for c in classes if c not in config.CLASS_COLOURS]
     if missing:
         print(f"WARNING: no CLASS_COLOURS entry in config.py for class(es) {missing} - "

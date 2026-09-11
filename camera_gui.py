@@ -94,7 +94,7 @@ class CameraController:
         if ret != 0:
             raise RuntimeError(f"[{self.user_id}] Open device failed, ret [0x{ret:x}]")
 
-        # --- Trigger config: SOFTWARE for this benchtop GUI ---
+        # --------------------------- Trigger config: SOFTWARE -------------------------
         # For the real belt integration, switch these two lines back to
         # cameras.py's hardware-trigger config instead:
         #   cam.MV_CC_SetEnumValue("TriggerSource", 0)   # Line0
@@ -111,11 +111,9 @@ class CameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=2000):
-        """
-        Fires the software trigger, retrieves one frame, returns it
+        """Fires the software trigger, retrieves one frame, returns it
         as a (H,W) uint8 numpy array - matches what process_frame()
-        expects. Assumes Mono8 (1 byte/pixel).
-        """
+        expects. Assumes Mono8 (1 byte/pixel)."""
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -169,6 +167,7 @@ class ShellSorterGUI:
         self.trigger_count = 0
         self.last_trigger_id = None
         self.last_trigger_data = {}  # camera_name -> capture data, populated by on_trigger, consumed by on_save
+        self.tally = {"PASS": 0, "FAIL": 0, "ERROR": 0}
 
         os.makedirs(config.OUTPUTS_DIR, exist_ok=True)
         os.makedirs(config.CAMERA_CAPTURES_DIR, exist_ok=True)
@@ -194,11 +193,19 @@ class ShellSorterGUI:
         tk.Label(title_box, text="Live camera test", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=(FONT_FAMILY, 10)).pack(anchor="w")
 
+        # Session tally - one entry per Trigger click, incremented in
+        # on_trigger() right after the verdict is computed. Right-aligned
+        # in the header so it's always visible without competing with
+        # the verdict banner for attention.
+        self.tally_var = tk.StringVar(value="Checked: 0   Pass: 0   Fail: 0")
+        tk.Label(header, textvariable=self.tally_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+                 font=(FONT_FAMILY, 10)).pack(side=tk.RIGHT, anchor="e")
+
         ttk.Separator(root, orient="horizontal").pack(fill=tk.X, padx=24, pady=(4, 0))
 
-        # Verdict banner: the main demo output, a full-width coloured
-        # block rather than just coloured text, so it reads clearly
-        # during a live demo. Colour/text set in
+        # --- Verdict banner: the main demo output, a full-width coloured
+        # block rather than just coloured text, so it reads clearly from
+        # across a room during a live demo. Colour/text set in
         # show_verdict(); starts neutral grey before the first trigger.
         self.verdict_banner = tk.Frame(root, bg=COLOUR_VERDICT[None])
         self.verdict_banner.pack(fill=tk.X, padx=24, pady=16)
@@ -212,7 +219,7 @@ class ShellSorterGUI:
                                              font=(FONT_FAMILY, 10), fg="white", bg=COLOUR_VERDICT[None])
         self.verdict_detail_label.pack(pady=(2, 14))
 
-        # ------------------ One card per camera, side by side ---------------------------
+        # --- One card per camera, side by side ---------------------------
         columns = tk.Frame(root, bg=COLOUR_BG)
         columns.pack(padx=24, pady=(0, 8))
 
@@ -242,17 +249,17 @@ class ShellSorterGUI:
                      font=(FONT_FAMILY, 9), wraplength=280, justify="left").pack(anchor="w", pady=(8, 0))
             self.camera_status_vars[name] = status_var
 
-        # -------- Timing (secondary info, deliberately understated) -----------
+        # --- Timing (secondary info, deliberately understated) -----------
         self.timing_var = tk.StringVar(value="")
         tk.Label(root, textvariable=self.timing_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=("Consolas", 9)).pack(pady=(4, 8))
 
-        # Buttons: Trigger is the primary action;
-        # Connect/Save are secondary
+        # --- Buttons: Trigger is the primary action, larger and accented;
+        # Connect/Save are secondary --------------------------------------
         btn_frame = tk.Frame(root, bg=COLOUR_BG)
         btn_frame.pack(pady=(4, 20))
         self.connect_btn = ttk.Button(btn_frame, text="Connect Cameras", style="Secondary.TButton",
-                                      command=self.on_connect)
+                                      command=self.on_connect_toggle)
         self.connect_btn.pack(side=tk.LEFT, padx=6)
         self.trigger_btn = ttk.Button(btn_frame, text="Trigger", style="Primary.TButton",
                                       command=self.on_trigger, state=tk.DISABLED)
@@ -284,7 +291,13 @@ class ShellSorterGUI:
         style.map("Secondary.TButton",
                   background=[("disabled", "#F3F4F6"), ("active", "#D1D5DB")])
 
-    def on_connect(self):
+    def on_connect_toggle(self):
+        if any(self.connected.values()):
+            self._do_disconnect()
+        else:
+            self._do_connect()
+
+    def _do_connect(self):
         try:
             device_list = MV_CC_DEVICE_INFO_LIST()
             ret = MvCamera.MV_CC_EnumDevices(MV_GIGE_DEVICE, device_list)
@@ -318,7 +331,20 @@ class ShellSorterGUI:
 
         if any(self.connected.values()):
             self.trigger_btn.config(state=tk.NORMAL)
-        self.connect_btn.config(state=tk.DISABLED)
+            self.connect_btn.config(text="Disconnect Cameras")
+
+    def _do_disconnect(self):
+        for cam in self.cameras.values():
+            cam.disconnect()
+        self.connected = {name: False for name in config.CAMERA_NAMES}
+        for name in config.CAMERA_NAMES:
+            self.camera_status_vars[name].set("Not connected")
+
+        self.trigger_btn.config(state=tk.DISABLED)
+        self.save_btn.config(state=tk.DISABLED)
+        self.connect_btn.config(text="Connect Cameras")
+        self.last_trigger_data = {}
+        self.show_verdict("—", "Click Trigger to begin")
 
     def on_trigger(self):
         self.trigger_btn.config(state=tk.DISABLED)
@@ -370,6 +396,7 @@ class ShellSorterGUI:
             camera_results = {name: data["results"] for name, data in self.last_trigger_data.items()}
             verdict, explanation, _ = fuse_pass_fail(camera_results)
             self.show_verdict(verdict, explanation)
+            self._increment_tally(verdict)
 
             if self.last_trigger_data:
                 self.save_btn.config(state=tk.NORMAL)
@@ -377,6 +404,19 @@ class ShellSorterGUI:
             messagebox.showerror("Trigger failed", str(e))
         finally:
             self.trigger_btn.config(state=tk.NORMAL)
+
+    def _increment_tally(self, verdict):
+        """
+        One entry per Trigger click - unlike live_camera.py, every
+        click here IS a deliberate, discrete check, so no debouncing is
+        needed the way a continuously-polled live feed would.
+        """
+        if verdict in self.tally:
+            self.tally[verdict] += 1
+        total = sum(self.tally.values())
+        self.tally_var.set(
+            f"Checked: {total}   Pass: {self.tally['PASS']}   Fail: {self.tally['FAIL']}"
+            + (f"   Errors: {self.tally['ERROR']}" if self.tally["ERROR"] else ""))
 
     def show_verdict(self, verdict, explanation):
         colour = COLOUR_VERDICT.get(verdict, COLOUR_VERDICT[None])
@@ -449,7 +489,7 @@ class ShellSorterGUI:
         rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         # real camera frames are ~5472x3648 - shrink for on-screen display,
-        # smaller per-camera since they need to fit side by side.
+        # smaller per-camera since two need to fit side by side now
         pil_img.thumbnail((650, 500))
         tk_img = ImageTk.PhotoImage(pil_img)
         label = self.image_labels[camera_name]

@@ -8,8 +8,8 @@ camera for SOFTWARE TRIGGERING (TriggerMode=1) because a GUI button
 click IS the trigger there - one grab per click. This script needs the
 OPPOSITE: FREE-RUN / CONTINUOUS acquisition (TriggerMode=0), so the
 camera just keeps streaming frames on its own and this script
-continuously pulls whatever's latest. Confirm TriggerMode's "off/free-
-run" value against your camera's MVS client node viewer the same way
+continuously pulls whatever's latest. Confirm TriggerMode's continuous
+run value against your camera's MVS client node viewer the same way
 TriggerSource needed confirming for camera_gui.py's software-trigger path.
 
 Reuses the exact same model/segmentation/classification/fusion pipeline
@@ -49,9 +49,8 @@ import config
 
 class LiveCameraController:
     """
-    Free-run (continuous) camera acquisition - deliberately NOT
-    software-triggered like camera_gui.py's CameraController. See
-    module docstring for why this needs to be different.
+    Continuous camera acquisition - deliberately NOT
+    software-triggered like camera_gui.py's CameraController.
     """
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
@@ -112,7 +111,7 @@ class LiveCameraController:
         width = stFrame.stFrameInfo.nWidth
         height = stFrame.stFrameInfo.nHeight
         buf_len = stFrame.stFrameInfo.nFrameLen
-        buf = (c_ubyte * buf_len)()
+        buf = (c_ubyte * buf_len)
         memmove(byref(buf), stFrame.pBufAddr, buf_len)
         frame = np.frombuffer(buf, dtype=np.uint8, count=width * height).reshape(
             (height, width)).copy()
@@ -145,6 +144,13 @@ class LiveDemoGUI:
         self.cameras = {name: LiveCameraController(name) for name in config.CAMERA_NAMES}
         self.connected = {name: False for name in config.CAMERA_NAMES}
         self.running = False
+        self.tally = {"PASS": 0, "FAIL": 0, "ERROR": 0}
+        # Tracks whether the CURRENT physical shell presence has already
+        # been counted - reset to False whenever it goes back to
+        # WAITING (shell removed), so the next shell placed counts as a
+        # new entry. Without this, a shell sitting in view for several
+        # seconds at ~5fps would be counted dozens of times, not once.
+        self._counted_this_presence = False
 
         header = tk.Frame(root, bg=COLOUR_BG)
         header.pack(fill=tk.X, padx=24, pady=(20, 8))
@@ -165,6 +171,10 @@ class LiveDemoGUI:
                  font=(FONT_FAMILY, 18, "bold")).pack(anchor="w")
         tk.Label(title_box, text="Live demo view", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=(FONT_FAMILY, 10)).pack(anchor="w")
+
+        self.tally_var = tk.StringVar(value="Checked: 0   Pass: 0   Fail: 0")
+        tk.Label(header, textvariable=self.tally_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+                 font=(FONT_FAMILY, 10)).pack(side=tk.RIGHT, anchor="e")
 
         self.verdict_banner = tk.Frame(root, bg=COLOUR_VERDICT["WAITING"])
         self.verdict_banner.pack(fill=tk.X, padx=24, pady=16)
@@ -245,7 +255,7 @@ class LiveDemoGUI:
         self.running = True
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-        self._last_frame_time = None  # tracks clock time between frames, set on first _loop() call
+        self._last_frame_time = None  # tracks true wall-clock time between frames, set on first _loop() call
         self._loop()
 
     def on_stop(self):
@@ -258,15 +268,19 @@ class LiveDemoGUI:
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
         self._set_verdict("WAITING", "Stopped")
+        self._counted_this_presence = False
 
     def _loop(self):
         if not self.running:
             return
 
-        # True frame-to-frame time - from the start of THIS loop back to
+        # frame-to-frame time - from the start of THIS loop back to
         # the start of the PREVIOUS one. This is what a person actually
         # perceives as the frame rate: work time PLUS the deliberate
-        # config.LIVE_POLL_INTERVAL_MS delay after it.
+        # config.LIVE_POLL_INTERVAL_MS delay after it. Reporting only the
+        # work time (as an earlier version of this did) understates the
+        # real interval and hides whether the delay or the work is
+        # actually the bottleneck - see chat message.
         now = time.perf_counter()
         true_frame_ms = (now - self._last_frame_time) * 1000 if self._last_frame_time else None
         self._last_frame_time = now
@@ -310,17 +324,35 @@ class LiveDemoGUI:
         # misfire worth flagging); here, it's just "waiting."
         if not camera_results or all(len(r) == 0 for r in camera_results.values()):
             self._set_verdict("WAITING", "Place a shell to begin")
+            # Belt is clear - reset so the NEXT shell placed counts as a
+            # fresh entry, not a continuation of whatever was counted before.
+            self._counted_this_presence = False
             return
 
         # Still settling (e.g. a hand moving through frame, or only one
         # camera has picked it up yet) - don't flash ERROR at the
         # customer for every transient in-between frame, just wait.
+        # Deliberately does NOT touch _counted_this_presence here - a
+        # brief drop to "Detecting..." while a shell shifts slightly
+        # shouldn't re-arm counting for what's still the same shell.
         if any(len(r) == 0 for r in camera_results.values()):
             self._set_verdict("WAITING", "Detecting...")
             return
 
         verdict, explanation, _ = fuse_pass_fail(camera_results)
         self._set_verdict(verdict, explanation)
+
+        if not self._counted_this_presence:
+            self._increment_tally(verdict)
+            self._counted_this_presence = True
+
+    def _increment_tally(self, verdict):
+        if verdict in self.tally:
+            self.tally[verdict] += 1
+        total = sum(self.tally.values())
+        self.tally_var.set(
+            f"Checked: {total}   Pass: {self.tally['PASS']}   Fail: {self.tally['FAIL']}"
+            + (f"   Errors: {self.tally['ERROR']}" if self.tally["ERROR"] else ""))
 
     def _set_verdict(self, verdict, explanation):
         colour = COLOUR_VERDICT.get(verdict, COLOUR_VERDICT["WAITING"])
