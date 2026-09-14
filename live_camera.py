@@ -351,6 +351,15 @@ class LiveDemoGUI:
             self._counted_this_presence = True
 
     def _increment_tally(self, verdict):
+        # DIAGNOSTIC - remove once confirmed working. This will show us
+        # exactly what verdict actually is and whether it matches a
+        # tally key - if there's ever a silent mismatch (extra
+        # whitespace, different capitalization, anything), this reveals
+        # it immediately instead of the increment just silently not
+        # happening.
+        print(f"DEBUG _increment_tally: verdict={verdict!r}  "
+              f"in self.tally={verdict in self.tally}  current tally={self.tally}")
+
         if verdict in self.tally:
             self.tally[verdict] += 1
         total = sum(self.tally.values())
