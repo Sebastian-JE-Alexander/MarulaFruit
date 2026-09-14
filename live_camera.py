@@ -48,10 +48,9 @@ import config
 
 
 class LiveCameraController:
-    """
-    Continuous camera acquisition - deliberately NOT
-    software-triggered like camera_gui.py's CameraController.
-    """
+    """Free-run (continuous) camera acquisition - deliberately NOT
+    software-triggered like camera_gui.py's CameraController. See
+    module docstring for why this needs to be different."""
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
@@ -92,13 +91,11 @@ class LiveCameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=500):
-        """
-        No software trigger command needed - the camera is already
+        """No software trigger command needed - the camera is already
         streaming continuously, this just pulls whatever the next
         available frame is. Returns None (not an error) if a frame
         isn't ready within the timeout - normal in free-run mode,
-        just try again next poll.
-        """
+        just try again next poll."""
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -111,8 +108,26 @@ class LiveCameraController:
         width = stFrame.stFrameInfo.nWidth
         height = stFrame.stFrameInfo.nHeight
         buf_len = stFrame.stFrameInfo.nFrameLen
-        buf = (c_ubyte * buf_len)
-        memmove(byref(buf), stFrame.pBufAddr, buf_len)
+
+        # DIAGNOSTIC - remove once this is confirmed working. If the
+        # error below still happens, these prints tell us exactly what
+        # buf_len/width/height actually were at the point of failure,
+        # rather than guessing again.
+        print(f"[{self.user_id}] DEBUG: width={width} height={height} "
+              f"buf_len={buf_len} (type={type(buf_len)})")
+
+        buf = (c_ubyte * buf_len)()
+        print(f"[{self.user_id}] DEBUG: buf type={type(buf)}")
+
+        # Switched from ctypes.memmove to cdll.msvcrt.memcpy - matches
+        # Hikrobot's own official sample code exactly. Both SHOULD be
+        # equivalent, but camera_gui.py's identical memmove/byref
+        # pattern works correctly in triggered mode on your hardware,
+        # so if free-run mode fails specifically here, matching the
+        # proven-working sample pattern exactly is the safer next step
+        # rather than assuming the two are perfectly interchangeable
+        # against however your SDK's struct fields are actually typed.
+        cdll.msvcrt.memcpy(byref(buf), stFrame.pBufAddr, buf_len)
         frame = np.frombuffer(buf, dtype=np.uint8, count=width * height).reshape(
             (height, width)).copy()
 
@@ -146,7 +161,7 @@ class LiveDemoGUI:
         self.running = False
         self.tally = {"PASS": 0, "FAIL": 0, "ERROR": 0}
         # Tracks whether the CURRENT physical shell presence has already
-        # been counted - reset to False whenever it goes back to
+        # been counted - reset to False whenever the belt goes back to
         # WAITING (shell removed), so the next shell placed counts as a
         # new entry. Without this, a shell sitting in view for several
         # seconds at ~5fps would be counted dozens of times, not once.
@@ -274,13 +289,13 @@ class LiveDemoGUI:
         if not self.running:
             return
 
-        # frame-to-frame time - from the start of this loop back to
+        # True frame-to-frame time - from the start of THIS loop back to
         # the start of the PREVIOUS one. This is what a person actually
         # perceives as the frame rate: work time PLUS the deliberate
         # config.LIVE_POLL_INTERVAL_MS delay after it. Reporting only the
         # work time (as an earlier version of this did) understates the
         # real interval and hides whether the delay or the work is
-        # actually the bottleneck.
+        # actually the bottleneck - see chat message.
         now = time.perf_counter()
         true_frame_ms = (now - self._last_frame_time) * 1000 if self._last_frame_time else None
         self._last_frame_time = now
@@ -318,13 +333,13 @@ class LiveDemoGUI:
 
     def _update_verdict(self, camera_results):
         # No shells anywhere = nothing placed yet - the normal resting
-        # state through most of a live screen, not an error. Different
+        # state through most of a live demo, not an error. Different
         # handling from camera_gui.py's trigger flow deliberately: there,
         # a 0-shell result from an actual button press IS meaningful (a
-        # misfire worth flagging); here, it's just IDLE.
+        # misfire worth flagging); here, it's just "waiting."
         if not camera_results or all(len(r) == 0 for r in camera_results.values()):
             self._set_verdict("WAITING", "Place a shell to begin")
-            # area is clear - reset so the NEXT shell placed counts as a
+            # Belt is clear - reset so the NEXT shell placed counts as a
             # fresh entry, not a continuation of whatever was counted before.
             self._counted_this_presence = False
             return
