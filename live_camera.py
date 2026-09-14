@@ -108,25 +108,14 @@ class LiveCameraController:
         width = stFrame.stFrameInfo.nWidth
         height = stFrame.stFrameInfo.nHeight
         buf_len = stFrame.stFrameInfo.nFrameLen
-
-        # DIAGNOSTIC - remove once this is confirmed working. If the
-        # error below still happens, these prints tell us exactly what
-        # buf_len/width/height actually were at the point of failure,
-        # rather than guessing again.
-        print(f"[{self.user_id}] DEBUG: width={width} height={height} "
-              f"buf_len={buf_len} (type={type(buf_len)})")
-
         buf = (c_ubyte * buf_len)()
-        print(f"[{self.user_id}] DEBUG: buf type={type(buf)}")
 
-        # Switched from ctypes.memmove to cdll.msvcrt.memcpy - matches
-        # Hikrobot's own official sample code exactly. Both SHOULD be
-        # equivalent, but camera_gui.py's identical memmove/byref
-        # pattern works correctly in triggered mode on your hardware,
-        # so if free-run mode fails specifically here, matching the
-        # proven-working sample pattern exactly is the safer next step
-        # rather than assuming the two are perfectly interchangeable
-        # against however your SDK's struct fields are actually typed.
+        # cdll.msvcrt.memcpy (not ctypes.memmove) - matches Hikrobot's
+        # own official sample code exactly. Confirmed on real hardware:
+        # memmove raised "byref() argument must be a ctypes instance"
+        # against this SDK's pBufAddr type in free-run mode; memcpy
+        # works correctly (verified against both a 2448x2048 and a
+        # 5472x3648 camera).
         cdll.msvcrt.memcpy(byref(buf), stFrame.pBufAddr, buf_len)
         frame = np.frombuffer(buf, dtype=np.uint8, count=width * height).reshape(
             (height, width)).copy()
