@@ -278,6 +278,18 @@ class LiveDemoGUI:
         if not self.running:
             return
 
+        # DIAGNOSTIC - remove once confirmed working. Detects overlapping
+        # loop executions (e.g. if Start got triggered more than once,
+        # spawning two independent update chains) - if loop_id ever jumps
+        # by more than 1, or if "STILL RUNNING" prints, that's the smoking
+        # gun for exactly this symptom.
+        self._loop_call_count = getattr(self, "_loop_call_count", 0) + 1
+        this_call_id = self._loop_call_count
+        if getattr(self, "_loop_in_progress", False):
+            print(f"DEBUG _loop: call #{this_call_id} starting while a PREVIOUS "
+                  f"call is STILL RUNNING - overlapping executions detected!")
+        self._loop_in_progress = True
+
         # True frame-to-frame time - from the start of THIS loop back to
         # the start of the PREVIOUS one. This is what a person actually
         # perceives as the frame rate: work time PLUS the deliberate
@@ -308,7 +320,7 @@ class LiveDemoGUI:
                 f"{len(results)} shell(s) detected  "
                 f"(grab {grab_ms:.0f} ms, segment+classify {process_ms:.0f} ms)")
 
-        self._update_verdict(camera_results)
+        self._update_verdict(camera_results, loop_call_id=this_call_id)
 
         work_ms = (time.perf_counter() - work_start) * 1000
         if true_frame_ms is not None:
@@ -318,9 +330,10 @@ class LiveDemoGUI:
         else:
             self.fps_var.set(f"Work: {work_ms:.0f} ms  (first frame)")
 
+        self._loop_in_progress = False  # DIAGNOSTIC - remove alongside the rest
         self.root.after(config.LIVE_POLL_INTERVAL_MS, self._loop)
 
-    def _update_verdict(self, camera_results):
+    def _update_verdict(self, camera_results, loop_call_id=None):
         # No shells anywhere = nothing placed yet - the normal resting
         # state through most of a live demo, not an error. Different
         # handling from camera_gui.py's trigger flow deliberately: there,
@@ -344,20 +357,34 @@ class LiveDemoGUI:
             return
 
         verdict, explanation, _ = fuse_pass_fail(camera_results)
+
+        # DIAGNOSTIC - remove once confirmed working. Shows the exact
+        # per-camera classifications that produced this verdict, and
+        # which loop iteration it came from - if the banner and the
+        # tally ever show different verdicts, this proves whether they
+        # came from the SAME loop call (impossible given the code below
+        # calls both with this same local `verdict`) or from two
+        # DIFFERENT overlapping calls (see the "STILL RUNNING" check
+        # in _loop()).
+        raw = {name: [(r["class"], round(r["confidence"], 2)) for r in results]
+               for name, results in camera_results.items()}
+        print(f"DEBUG _update_verdict: loop_call_id={loop_call_id}  "
+              f"raw_results={raw}  ->  verdict={verdict!r}")
+
         self._set_verdict(verdict, explanation)
 
         if not self._counted_this_presence:
-            self._increment_tally(verdict)
+            self._increment_tally(verdict, loop_call_id=loop_call_id)
             self._counted_this_presence = True
 
-    def _increment_tally(self, verdict):
+    def _increment_tally(self, verdict, loop_call_id=None):
         # DIAGNOSTIC - remove once confirmed working. This will show us
         # exactly what verdict actually is and whether it matches a
         # tally key - if there's ever a silent mismatch (extra
         # whitespace, different capitalization, anything), this reveals
         # it immediately instead of the increment just silently not
         # happening.
-        print(f"DEBUG _increment_tally: verdict={verdict!r}  "
+        print(f"DEBUG _increment_tally: loop_call_id={loop_call_id}  verdict={verdict!r}  "
               f"in self.tally={verdict in self.tally}  current tally={self.tally}")
 
         if verdict in self.tally:
