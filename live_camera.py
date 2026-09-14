@@ -28,6 +28,7 @@ import sys
 import time
 import tkinter as tk
 from ctypes import *
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -48,9 +49,11 @@ import config
 
 
 class LiveCameraController:
-    """Free-run (continuous) camera acquisition - deliberately NOT
+    """
+    Free-run (continuous) camera acquisition - deliberately NOT
     software-triggered like camera_gui.py's CameraController. See
-    module docstring for why this needs to be different."""
+    module docstring for why this needs to be different.
+    """
 
     def __init__(self, user_id, exposure=config.EXPOSURE_VAL):
         self.user_id = user_id
@@ -148,7 +151,9 @@ class LiveDemoGUI:
         self.cameras = {name: LiveCameraController(name) for name in config.CAMERA_NAMES}
         self.connected = {name: False for name in config.CAMERA_NAMES}
         self.running = False
-        self.tally = {"PASS": 0, "FAIL": 0, "ERROR": 0}
+        # Tally disabled for now
+        # Uncomment to re-enable once investigated further.
+        # self.tally = {"PASS": 0, "FAIL": 0, "ERROR": 0}
         # Tracks whether the CURRENT physical shell presence has already
         # been counted - reset to False whenever the belt goes back to
         # WAITING (shell removed), so the next shell placed counts as a
@@ -176,9 +181,10 @@ class LiveDemoGUI:
         tk.Label(title_box, text="Live demo view", bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=(FONT_FAMILY, 10)).pack(anchor="w")
 
-        self.tally_var = tk.StringVar(value="Checked: 0   Pass: 0   Fail: 0")
-        tk.Label(header, textvariable=self.tally_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
-                 font=(FONT_FAMILY, 10)).pack(side=tk.RIGHT, anchor="e")
+        # Tally display disabled for now - see __init__ note above.
+        # self.tally_var = tk.StringVar(value="Checked: 0   Pass: 0   Fail: 0")
+        # tk.Label(header, textvariable=self.tally_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
+        #          font=(FONT_FAMILY, 10)).pack(side=tk.RIGHT, anchor="e")
 
         self.verdict_banner = tk.Frame(root, bg=COLOUR_VERDICT["WAITING"])
         self.verdict_banner.pack(fill=tk.X, padx=24, pady=16)
@@ -303,6 +309,7 @@ class LiveDemoGUI:
 
         work_start = time.perf_counter()
         camera_results = {}
+        camera_frames = {}  # raw (pre-annotation) frames, kept for auto-saving on ERROR
         for name, cam in self.cameras.items():
             if not self.connected[name]:
                 continue
@@ -316,11 +323,15 @@ class LiveDemoGUI:
             annotated, results, process_ms = process_frame(frame, self.model, self.device, self.classes)
             self._display_frame(name, annotated)
             camera_results[name] = results
+            camera_frames[name] = frame
             self.camera_status_vars[name].set(
                 f"{len(results)} shell(s) detected  "
                 f"(grab {grab_ms:.0f} ms, segment+classify {process_ms:.0f} ms)")
 
         self._update_verdict(camera_results, loop_call_id=this_call_id)
+
+        if self.verdict_var.get() == "ERROR":
+            self._save_error_frames(camera_frames, camera_results)
 
         work_ms = (time.perf_counter() - work_start) * 1000
         if true_frame_ms is not None:
@@ -332,6 +343,24 @@ class LiveDemoGUI:
 
         self._loop_in_progress = False  # DIAGNOSTIC - remove alongside the rest
         self.root.after(config.LIVE_POLL_INTERVAL_MS, self._loop)
+
+    def _save_error_frames(self, camera_frames, camera_results):
+        """Auto-saves the raw frame from every camera whenever a live
+        ERROR verdict happens (e.g. a camera detecting more than one
+        shell in frame at once). These are exactly the frames
+        diagnose_double_detection.py needs - without this, an ERROR
+        seen live has nothing left to investigate by the time it's
+        noticed, since nothing was otherwise being saved to disk."""
+        os.makedirs(config.LIVE_ERROR_CAPTURES_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        for name, frame in camera_frames.items():
+            n_shells = len(camera_results.get(name, []))
+            path = os.path.join(config.LIVE_ERROR_CAPTURES_DIR,
+                                f"{timestamp}_{name}_{n_shells}shells.png")
+            cv2.imwrite(path, frame)
+        print(f"ERROR verdict - saved raw frame(s) to {config.LIVE_ERROR_CAPTURES_DIR}/ "
+              f"for diagnosis (run diagnose_double_detection.py on the camera that "
+              f"shows more than 1 in its filename)")
 
     def _update_verdict(self, camera_results, loop_call_id=None):
         # No shells anywhere = nothing placed yet - the normal resting
@@ -357,25 +386,16 @@ class LiveDemoGUI:
             return
 
         verdict, explanation, _ = fuse_pass_fail(camera_results)
-
-        # DIAGNOSTIC - remove once confirmed working. Shows the exact
-        # per-camera classifications that produced this verdict, and
-        # which loop iteration it came from - if the banner and the
-        # tally ever show different verdicts, this proves whether they
-        # came from the SAME loop call (impossible given the code below
-        # calls both with this same local `verdict`) or from two
-        # DIFFERENT overlapping calls (see the "STILL RUNNING" check
-        # in _loop()).
-        raw = {name: [(r["class"], round(r["confidence"], 2)) for r in results]
-               for name, results in camera_results.items()}
-        print(f"DEBUG _update_verdict: loop_call_id={loop_call_id}  "
-              f"raw_results={raw}  ->  verdict={verdict!r}")
-
         self._set_verdict(verdict, explanation)
 
-        if not self._counted_this_presence:
-            self._increment_tally(verdict, loop_call_id=loop_call_id)
-            self._counted_this_presence = True
+        # Tally counting disabled for now - see __init__ note. The
+        # _counted_this_presence bookkeeping below is left running since
+        # it's used elsewhere (ERROR auto-save relies on nothing from
+        # it, but harmless to keep for whenever tally is re-enabled).
+        # if not self._counted_this_presence:
+        #     self._increment_tally(verdict, loop_call_id=loop_call_id)
+        #     self._counted_this_presence = True
+        self._counted_this_presence = True
 
     def _increment_tally(self, verdict, loop_call_id=None):
         # DIAGNOSTIC - remove once confirmed working. This will show us
