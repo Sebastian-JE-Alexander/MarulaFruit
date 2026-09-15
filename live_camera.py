@@ -19,6 +19,7 @@ judged good/bad is identical between the two scripts, by design - so a
 result seen here means the same thing it would in camera_gui.py.
 
 
+
 Usage: python live_camera.py
 -----------------------------------------------------------------------
 """
@@ -44,13 +45,13 @@ from CameraParams_header import *
 
 from detect_and_classify import load_model, process_frame, fuse_pass_fail
 from gui_theme import (FONT_FAMILY, COLOUR_BG, COLOUR_CARD_BG, COLOUR_CARD_BORDER,
-                       COLOUR_TEXT, COLOUR_TEXT_MUTED, COLOUR_VERDICT, find_logo_path)
+                       COLOUR_TEXT, COLOUR_TEXT_MUTED, COLOUR_VERDICT, find_logo_path, COLOUR_ACCENT)
 import config
 
 
 class LiveCameraController:
     """
-    Free-run (continuous) camera acquisition - deliberately NOT
+    Continuous camera acquisition - deliberately NOT
     software-triggered like camera_gui.py's CameraController. See
     module docstring for why this needs to be different.
     """
@@ -61,6 +62,12 @@ class LiveCameraController:
         self.exposure = exposure
 
     def connect(self, device_list):
+        """
+        MVS SDK work flow for connecting to camera devices.
+        First checks the enumerated device list and identifies
+        the cameras by their userID. In this case only connects
+        to the camera if the userID matches one listed in config.py
+        """
         matched_device = None
         for i in range(device_list.nDeviceNum):
             st_device = cast(device_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
@@ -82,9 +89,9 @@ class LiveCameraController:
         if ret != 0:
             raise RuntimeError(f"[{self.user_id}] Open device failed, ret [0x{ret:x}]")
 
-        # Free-run / continuous acquisition - the key difference from
+        # Continuous acquisition - the key difference from
         # camera_gui.py, which sets TriggerMode=1 for software triggering.
-        cam.MV_CC_SetEnumValue("TriggerMode", 0)  # 0 = trigger mode OFF (free-run)
+        cam.MV_CC_SetEnumValue("TriggerMode", 0)  # 0 = trigger mode OFF (continuous)
         cam.MV_CC_SetFloatValue("ExposureTime", self.exposure)
 
         ret = cam.MV_CC_StartGrabbing()
@@ -94,11 +101,13 @@ class LiveCameraController:
         self.cam = cam
 
     def grab_frame(self, timeout_ms=500):
-        """No software trigger command needed - the camera is already
+        """
+        No software trigger command needed - the camera is already
         streaming continuously, this just pulls whatever the next
         available frame is. Returns None (not an error) if a frame
-        isn't ready within the timeout - normal in free-run mode,
-        just try again next poll."""
+        isn't ready within the timeout - normal in continuous mode,
+        just try again next poll.
+        """
         if self.cam is None:
             raise RuntimeError(f"[{self.user_id}] Camera not connected")
 
@@ -113,12 +122,11 @@ class LiveCameraController:
         buf_len = stFrame.stFrameInfo.nFrameLen
         buf = (c_ubyte * buf_len)()
 
-        # cdll.msvcrt.memcpy (not ctypes.memmove) - matches Hikrobot's
+        # cdll.msvcrt.memcpy (not ctypes.memmove) - matches Hikrobot
         # own official sample code exactly. Confirmed on real hardware:
         # memmove raised "byref() argument must be a ctypes instance"
-        # against this SDK's pBufAddr type in free-run mode; memcpy
-        # works correctly (verified against both a 2448x2048 and a
-        # 5472x3648 camera).
+        # against this SDK's pBufAddr type in continuous mode; memcpy
+        # works correctly.
         cdll.msvcrt.memcpy(byref(buf), stFrame.pBufAddr, buf_len)
         frame = np.frombuffer(buf, dtype=np.uint8, count=width * height).reshape(
             (height, width)).copy()
@@ -127,6 +135,11 @@ class LiveCameraController:
         return frame
 
     def disconnect(self):
+        """
+        Follows the MVS SDK flowchart for disconnecting from the camera.
+        This order must be followed for camera to be able to easily be
+        reconnected after it was disconnected.
+        """
         if self.cam:
             try:
                 self.cam.MV_CC_StopGrabbing()
@@ -151,7 +164,7 @@ class LiveDemoGUI:
         self.cameras = {name: LiveCameraController(name) for name in config.CAMERA_NAMES}
         self.connected = {name: False for name in config.CAMERA_NAMES}
         self.running = False
-        # Tally disabled for now
+        # --------------- Tally disabled for now ----------------------
         # Uncomment to re-enable once investigated further.
         # self.tally = {"PASS": 0, "FAIL": 0, "ERROR": 0}
         # Tracks whether the CURRENT physical shell presence has already
@@ -287,8 +300,7 @@ class LiveDemoGUI:
         # DIAGNOSTIC - remove once confirmed working. Detects overlapping
         # loop executions (e.g. if Start got triggered more than once,
         # spawning two independent update chains) - if loop_id ever jumps
-        # by more than 1, or if "STILL RUNNING" prints, that's the smoking
-        # gun for exactly this symptom.
+        # by more than 1, or if "STILL RUNNING" prints
         self._loop_call_count = getattr(self, "_loop_call_count", 0) + 1
         this_call_id = self._loop_call_count
         if getattr(self, "_loop_in_progress", False):
@@ -296,20 +308,20 @@ class LiveDemoGUI:
                   f"call is STILL RUNNING - overlapping executions detected!")
         self._loop_in_progress = True
 
-        # True frame-to-frame time - from the start of THIS loop back to
-        # the start of the PREVIOUS one. This is what a person actually
-        # perceives as the frame rate: work time PLUS the deliberate
+        # True frame-to-frame time - from the start of this loop back to
+        # the start of the PREVIOUS one. This is what is actually
+        # perceived as the frame rate: work time + the predefined
         # config.LIVE_POLL_INTERVAL_MS delay after it. Reporting only the
-        # work time (as an earlier version of this did) understates the
+        # work time (as a previous version of this did) understates the
         # real interval and hides whether the delay or the work is
-        # actually the bottleneck - see chat message.
+        # actually the bottleneck.
         now = time.perf_counter()
         true_frame_ms = (now - self._last_frame_time) * 1000 if self._last_frame_time else None
         self._last_frame_time = now
 
         work_start = time.perf_counter()
         camera_results = {}
-        camera_frames = {}  # raw (pre-annotation) frames, kept for auto-saving on ERROR
+        camera_frames = {}  # raw (before they are annotated) frames, kept for auto-saving on ERROR
         for name, cam in self.cameras.items():
             if not self.connected[name]:
                 continue
@@ -318,7 +330,7 @@ class LiveDemoGUI:
             frame = cam.grab_frame()
             grab_ms = (time.perf_counter() - grab_start) * 1000
             if frame is None:
-                continue  # no new frame ready this cycle - normal in free-run, just skip
+                continue  # no new frame ready this cycle - normal in continuous, just skip
 
             annotated, results, process_ms = process_frame(frame, self.model, self.device, self.classes)
             self._display_frame(name, annotated)
@@ -345,12 +357,14 @@ class LiveDemoGUI:
         self.root.after(config.LIVE_POLL_INTERVAL_MS, self._loop)
 
     def _save_error_frames(self, camera_frames, camera_results):
-        """Auto-saves the raw frame from every camera whenever a live
+        """
+        Auto-saves the raw frame from every camera whenever a live
         ERROR verdict happens (e.g. a camera detecting more than one
-        shell in frame at once). These are exactly the frames
+        shell in frame at once). These are the frames
         diagnose_double_detection.py needs - without this, an ERROR
         seen live has nothing left to investigate by the time it's
-        noticed, since nothing was otherwise being saved to disk."""
+        noticed, since nothing was being saved to disk.
+        """
         os.makedirs(config.LIVE_ERROR_CAPTURES_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         for name, frame in camera_frames.items():
@@ -364,20 +378,20 @@ class LiveDemoGUI:
 
     def _update_verdict(self, camera_results, loop_call_id=None):
         # No shells anywhere = nothing placed yet - the normal resting
-        # state through most of a live demo, not an error. Different
+        # state through most of a live capture, not an error. Different
         # handling from camera_gui.py's trigger flow deliberately: there,
-        # a 0-shell result from an actual button press IS meaningful (a
-        # misfire worth flagging); here, it's just "waiting."
+        # a 0-shell result from an actual button press IS meaningful
+        # (something worth flagging); here, it's just "waiting."
         if not camera_results or all(len(r) == 0 for r in camera_results.values()):
             self._set_verdict("WAITING", "Place a shell to begin")
-            # Belt is clear - reset so the NEXT shell placed counts as a
+            # area is clear - reset so the NEXT shell placed counts as a
             # fresh entry, not a continuation of whatever was counted before.
             self._counted_this_presence = False
             return
 
         # Still settling (e.g. a hand moving through frame, or only one
-        # camera has picked it up yet) - don't flash ERROR at the
-        # customer for every transient in-between frame, just wait.
+        # camera has picked it up yet) - don't flash ERROR
+        # for every transient in-between frame, just wait.
         # Deliberately does NOT touch _counted_this_presence here - a
         # brief drop to "Detecting..." while a shell shifts slightly
         # shouldn't re-arm counting for what's still the same shell.

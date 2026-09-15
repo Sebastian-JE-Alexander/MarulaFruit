@@ -49,7 +49,7 @@ def set_seed(seed=config.SEED):
 
 def format_duration(seconds):
     """
-    H:MM:SS for anything over an hour, otherwise M:SS - readable either way.
+    H:MM:SS for anything over an hour, otherwise M:SS
     """
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
@@ -92,7 +92,7 @@ def compute_class_weights(train_dir, classes):
     Necessary as soon as classes stop being roughly equal in count -
     e.g. if you keep photographing new good shells (real diversity gain)
     while bad stays capped by reshuffling the same limited physical
-    stock (no real diversity gain, just more images of it), good will
+    stock (no real diversity gain only pose variety), good class will
     naturally pull ahead in raw count. That's fine and worth doing
     anyway - this weighting is what stops the count difference itself
     from biasing the model, so you don't have to hold back on

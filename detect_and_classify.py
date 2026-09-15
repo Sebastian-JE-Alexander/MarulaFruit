@@ -183,27 +183,24 @@ def detect_and_classify(image_path, model, device, classes, output_path=None,
 def fuse_pass_fail(camera_results):
     """
     Combines single-shell results from multiple camera angles into
-    one PASS/FAIL verdict, for the "one shell at a time, multiple
-    camera angles" demo setup.
+    one PASS/FAIL verdict, for one shell, multiple camera angles setup.
 
     camera_results: dict of camera_name -> list of shell-result dicts
     (each with 'class'/'confidence'), i.e. process_frame()'s `results`
     output per camera, for a frame expected to contain exactly one shell.
 
-    Rule: FAIL if ANY camera calls it 'bad'. PASS only if EVERY camera
+    RULE: FAIL if ANY camera calls it 'bad'. PASS only if EVERY camera
     that saw the shell called it 'good'. Deliberately NOT a confidence
-    average across cameras - the customer explicitly said missing/open
-    eyelid shells are "particularly important... to remove", meaning a
-    missed defect (false negative) costs more than a wrongly-rejected
-    good shell (false positive). The whole point of a second camera
-    angle is catching a defect that's only visible from one side -
-    averaging a clear detection from one camera against a "can't see
-    anything wrong from here" read from the other would dilute exactly
-    the signal the second camera exists to provide. A plain OR toward
-    'bad' preserves it instead.
+    average across cameras - meaning a missed defect (false negative)
+    costs more than a wrongly-rejected good shell (false positive).
+    The whole point of a second camera angle is catching a defect that's
+    only visible from one side - averaging a clear detection from one camera
+    against a "no defects in this view" read from the other would
+    dilute exactly the signal the second camera exists to provide.
+    An OR Logic biased towards the 'bad' class preserves it instead.
 
     Returns (verdict, explanation, per_camera_summary):
-      verdict: "PASS", "FAIL", or "ERROR" (wrong shell count in some camera)
+      verdict: "PASS", "FAIL", or "ERROR" (wrong shell count in a camera view)
       explanation: one-line human-readable reason, good for display
       per_camera_summary: {camera_name: single result dict}, cameras
         with a valid single-shell read only

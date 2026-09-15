@@ -40,7 +40,7 @@ def check_frame(path, output_dir, min_area=config.MIN_BLOB_AREA):
     n_outliers = 0
     for i, (x, y, w, h) in enumerate(boxes):
         area = w * h
-        # Same outlier idea as the real pipeline's own rejection filter,
+        # Same outlier idea as the rejection filter,
         # but shown here rather than silently dropped, so you can see
         # what's borderline, not just what already passed. Threshold
         # tuned down from an initial 2.0x/0.5x after testing found a

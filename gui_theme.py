@@ -1,10 +1,9 @@
 """
 ----------------------------- gui_theme.py --------------------------
-Shared visual design tokens for every GUI script in this project
+Shared visual design for every GUI script in this project
 (camera_gui.py, live_camera.py, and anything else added later). One
-place so multiple GUI scripts can't drift
-into slightly different colours over time - same reasoning as
-config.py centralizing the non-visual constants.
+place so multiple GUIs aren't slightly different from each other.
+Same reasoning as config.py
 ---------------------------------------------------------------------
 """
 
@@ -12,15 +11,15 @@ import os
 import glob
 
 FONT_FAMILY = "Segoe UI"  # standard Windows UI font
-# Tkinter silently falls back to a system default if
-# ever unavailable, so this stays safe on other platforms too
+                          # Tkinter silently falls back to a system default if
+                          # ever unavailable, so this stays safe on other platforms too
 
-COLOUR_BG = "#F4F5F7"  # window background
-COLOUR_CARD_BG = "#FFFFFF"  # camera panel background
+COLOUR_BG = "#F4F5F7"         # window background
+COLOUR_CARD_BG = "#FFFFFF"    # camera panel background
 COLOUR_CARD_BORDER = "#E2E4E9"
 COLOUR_TEXT = "#1F2430"
 COLOUR_TEXT_MUTED = "#6B7280"
-COLOUR_ACCENT = "#2563EB"  # primary action colour (e.g. Trigger button)
+COLOUR_ACCENT = "#2563EB"     # primary action colour (e.g. Trigger button)
 
 COLOUR_VERDICT = {
     "PASS": "#16A34A",

@@ -187,13 +187,16 @@ def _reject_size_outliers(boxes, min_fraction_of_median=0.35):
     real shells happen to appear at in a given photo.
     """
     if len(boxes) < 2:
-        return boxes
+        return boxes # nothing to compare against with 0 or 1 box
     areas = sorted(b[2] * b[3] for b in boxes)
-    median_area = areas[len(areas) // 2]
+    median_area = areas[len(areas) // 2]  # the "typical" shell size in THIS photo specifically
     return [b for b in boxes if (b[2] * b[3]) >= median_area * min_fraction_of_median]
 
 
 def _odd(n):
+    # cv2.adaptiveThreshold requires an odd block size - it errors (or misbehaves,
+    # depending on OpenCV version) on an even one, since the block needs a single centre
+    # pixel to be well-defined.
     return n if n % 2 == 1 else n + 1
 
 
@@ -217,9 +220,14 @@ def _dedupe_boxes(boxes, iou_threshold=0.5, containment_threshold=0.7):
     """
     if not boxes:
         return []
+    # Largest first: a genuine shell's box should be the more complete detection
+    # of any overlapping pair, so keeping it (and discarding whatever smaller box overlaps
+    # or is contained within it) is the right way round.
     boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
     kept = []
     for box in boxes:
+        # OR logic (genuine overlap, or containment) is enough on its own to mark this as a duplicate
+        # of something already kept. See the docstring above for why IOU alone misses the containment case.
         is_duplicate = any(
             _iou(box, k) > iou_threshold or _containment_fraction(box, k) > containment_threshold
             for k in kept
@@ -240,8 +248,10 @@ def _containment_fraction(small, big):
     """
     sx0, sy0, sw, sh = small
     bx0, by0, bw, bh = big
-    sx1, sy1 = sx0 + sw, sy0 + sh
-    bx1, by1 = bx0 + bw, by0 + bh
+    sx1, sy1 = sx0 + sw, sy0 + sh # small's bottom right corner
+    bx1, by1 = bx0 + bw, by0 + bh # big's bottom right corner
+    # The overlapping rectangles corners - if it has no positive
+    # width or height (checked below), the boxes don't overlap at all.
     ix0, iy0 = max(sx0, bx0), max(sy0, by0)
     ix1, iy1 = min(sx1, bx1), min(sy1, by1)
     if ix1 <= ix0 or iy1 <= iy0:
@@ -252,6 +262,13 @@ def _containment_fraction(small, big):
 
 
 def _iou(a, b):
+    """
+    Intersection-over-union: overlap area divided by combined area.
+    1.0 = identical boxes, 0.0 = no overlap at all.
+    Unlike _containment_fraction, this treats both boxes symmetrically.
+    which is its blind spot for small bounding box inside big bounding box
+    case (see _dedupe_boxes docstring.)
+    """
     ax0, ay0, aw, ah = a
     bx0, by0, bw, bh = b
     ax1, ay1 = ax0 + aw, ay0 + ah
@@ -261,15 +278,28 @@ def _iou(a, b):
     if ix1 <= ix0 or iy1 <= iy0:
         return 0.0
     intersection = (ix1 - ix0) * (iy1 - iy0)
-    union = aw * ah + bw * bh - intersection
+    union = aw * ah + bw * bh - intersection # combined area, counted once not twice.
     return intersection / union if union else 0.0
 
 
 def crop_shell(gray, box, pad_factor=1.25, out_size=160):
+    """
+    Crops a square region centred on the detected box, padded beyond the box's own edges, then resized to a fixed size.
+
+    pad_factor=1.25 a little extra border around the shell rather than cropping exactly to its edges. Segmentation boxes
+    aren't pixel perfect ( a slightly loose or tight contour), so a small margin makes the crop more forgiving of that, and
+    gives the classifier a bit of surrounding context rather than a shell cut-off right at its edge.
+
+    Cropping a square region (side x side) centred on the box, rather than the box's own (possibly non-square) width/height,
+    matters because every crop then gets resized to the same out_size x out_size.
+    Resizing a non-square region to a square target size would distort the objects proportions.
+    """
     x, y, w, h = box
-    cx, cy = x + w // 2, y + h // 2
-    side = int(max(w, h) * pad_factor)
+    cx, cy = x + w // 2, y + h // 2       # box centre
+    side = int(max(w, h) * pad_factor)    # square side length, from the box's longer dimension
     H, W = gray.shape[:2]
+    # Clamp to the images actual bounds - a box near an edge shouldn't
+    # try to crop outside the frame.
     x0, y0 = max(cx - side // 2, 0), max(cy - side // 2, 0)
     x1, y1 = min(cx + side // 2, W), min(cy + side // 2, H)
     crop = gray[y0:y1, x0:x1]
@@ -287,7 +317,7 @@ def process_class(input_dir, class_name, train_root=config.TRAIN_DIR,
     you're reshuffling the same shells for extra pose variety, use
     process_two_folders() instead - see its docstring for why.
 
-    This function has been depreciated but kept here as an example.
+    NOTE: This function has been depreciated but kept here as an example.
     """
     train_out = os.path.join(train_root, class_name)
     val_out = os.path.join(val_root, class_name)
@@ -300,11 +330,11 @@ def process_class(input_dir, class_name, train_root=config.TRAIN_DIR,
         print(f"[{class_name}] No .png files found - check input_dir path.")
         return
 
-    random.seed(seed)
+    random.seed(seed)  # fixed seed - same split every time this is re-run on the same photos.
     shuffled = paths[:]
     random.shuffle(shuffled)
-    n_val_photos = max(int(len(shuffled) * val_fraction), 1)
-    val_photos = set(shuffled[:n_val_photos])
+    n_val_photos = max(int(len(shuffled) * val_fraction), 1)  # at leat 1 photo even for a tiny batch
+    val_photos = set(shuffled[:n_val_photos])            # the first n_val_photos of the SHUFFLED list.
 
     _segment_photos(paths, val_photos, train_out, val_out, class_name,
                     min_area, expected_per_photo)
@@ -358,7 +388,7 @@ def process_two_folders(train_input_dir, val_input_dir, class_name,
 
 def _segment_photos(paths, val_photos, train_out, val_out, class_name,
                     min_area, expected_per_photo):
-    counts_per_photo = []
+    counts_per_photo = [] # tracked purely for the sanity check warning at the end.
     total_train, total_val = 0, 0
 
     for path in paths:
@@ -366,6 +396,12 @@ def _segment_photos(paths, val_photos, train_out, val_out, class_name,
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
         boxes = find_blobs(gray, min_area=min_area)
         counts_per_photo.append((os.path.basename(path), len(boxes)))
+
+        # Which side of the split THIS WHOLE PHOTO belongs to was
+        # already decided by the caller (either randomly in process_class,
+        # or by which folder the photo came from in process_two_folders)
+        # every crop from it goes to the same side, since splitting at the crop level
+        # instead could leak a physical shell across train/validation (see module docstring).
 
         out_dir = val_out if path in val_photos else train_out
         stem = os.path.splitext(os.path.basename(path))[0]
@@ -381,6 +417,11 @@ def _segment_photos(paths, val_photos, train_out, val_out, class_name,
     n_val_photos = len(val_photos)
     print(f"[{class_name}] Train: {total_train} crops from {len(paths) - n_val_photos} photos -> {train_out}")
     print(f"[{class_name}] Val:   {total_val} crops from {n_val_photos} photos -> {val_out}")
+
+    # Every grid photo should show exactly expected_per_photo shells
+    # Any photo that didn't is worth a manual look (a merged/split detection,
+    # a shell touching the frame edge, an unusually posed shell that confused segmentation)
+    # rather than silently trusting whatever number came out.
 
     off_count = [c for c in counts_per_photo if c[1] != expected_per_photo]
     if off_count:

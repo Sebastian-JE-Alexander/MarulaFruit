@@ -32,6 +32,8 @@ VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp")
 
 
 def list_images(folder):
+    # Non-recursive on purpose, only the immediate <class>/ folders
+    # matter here, not any nested structure that could get added later.
     if not os.path.isdir(folder):
         return []
     return [os.path.join(folder, f) for f in os.listdir(folder)
@@ -39,6 +41,7 @@ def list_images(folder):
 
 
 def file_hash(path):
+    # MD5 purely for exact-duplicate detection (same bytes = same hash)
     with open(path, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()
 
@@ -53,7 +56,7 @@ def check_class_counts(train_dir, val_dir):
         if os.path.isdir(base):
             classes.update(c for c in os.listdir(base)
                            if os.path.isdir(os.path.join(base, c)))
-    classes = sorted(classes)
+    classes = sorted(classes) # sorted so output order is stable and matches ImageFolder's own index order
 
     if not classes:
         print("  No class folders found under either directory.")
@@ -67,6 +70,8 @@ def check_class_counts(train_dir, val_dir):
         val_pct = (n_val / total * 100) if total else 0
         counts[cls] = (n_train, n_val)
 
+        # Checked in order of severity, an empty class is more important than
+        # a skewed split percentage.
         flag = ""
         if total == 0:
             flag = "  <-- EMPTY, no images at all"
@@ -80,10 +85,19 @@ def check_class_counts(train_dir, val_dir):
         print(f"  {cls:25s} train={n_train:4d}  val={n_val:4d}  "
               f"(val {val_pct:4.0f}%){flag}")
 
+
+
+    # Balance ratio compares TRAINING counts only, not total - training
+    # is where class weighting (train.py) actually operates, so that's
+    # the number relevant to whether weighting alone can compensate.
     train_counts = [c[0] for c in counts.values() if c[0] > 0]
     if len(train_counts) >= 2:
         ratio = max(train_counts) / min(train_counts)
         print(f"\n  Class balance (train, max/min): {ratio:.2f}x", end="")
+        # Thresholds are judgement calls, not hard limits from any
+        # formula - 5x is "class weighting alone probably isn't enough,
+        # the minority class needs more real images"; 2x is "normal,
+        # weighting can handle the imbalance."
         if ratio > 5:
             print("  <-- large imbalance. train.py's class weighting "
                   "compensates in the loss function, but the minority "
@@ -117,6 +131,8 @@ def check_file_integrity(train_dir, val_dir):
 
     unreadable, sizes, color_flags = [], [], []
     for path in all_paths:
+        # IMREAD_UNCHANGED, not the default imread, the default forces 3 channels
+        # on everything, which would make the colour check below meaningless.
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         if img is None:
             unreadable.append(path)
@@ -124,6 +140,8 @@ def check_file_integrity(train_dir, val_dir):
         h, w = img.shape[:2]
         sizes.append((w, h))
         if img.ndim == 3 and img.shape[2] >= 3:
+            # a grayscale image saved in a 3 channel file still has identical
+            # BGR values at every pixel.
             b, g, r = img[..., 0], img[..., 1], img[..., 2]
             if not (np.array_equal(b, g) and np.array_equal(g, r)):
                 color_flags.append(path)
@@ -138,6 +156,11 @@ def check_file_integrity(train_dir, val_dir):
     if sizes:
         size_counts = Counter(sizes)
         if len(size_counts) > 1:
+            # Report against the most common size, not necessarily the
+            # "correct" one, with real data there's no way to know in
+            # advance which size is right, but whatever most images
+            # agree on is the reasonable baseline to compare the rest
+            # against.
             (common_size, common_n) = size_counts.most_common(1)[0]
             print(f"\n  Image sizes are NOT all consistent - most common is "
                   f"{common_size[0]}x{common_size[1]} ({common_n}/{len(sizes)}). "
@@ -172,6 +195,11 @@ def check_duplicates_across_split(train_dir, val_dir):
           "  shell - those differ pixel-for-pixel - that risk still needs\n"
           "  the physically-separate-before-reshuffling discipline.)\n")
 
+    # Build a hash -> path lookup for every training image first, then
+    # check each validation image's hash against it
+    # 0(n) rather than comparing every train image against every validation
+    # image directly.
+
     train_hashes = {}
     for cls in (os.listdir(train_dir) if os.path.isdir(train_dir) else []):
         cls_dir = os.path.join(train_dir, cls)
@@ -185,7 +213,7 @@ def check_duplicates_across_split(train_dir, val_dir):
         if os.path.isdir(cls_dir):
             for path in list_images(cls_dir):
                 h = file_hash(path)
-                if h in train_hashes:
+                if h in train_hashes:  # exact byte for byte match found on the training side
                     duplicates.append((train_hashes[h], path))
 
     if duplicates:

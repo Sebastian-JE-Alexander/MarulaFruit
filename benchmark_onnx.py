@@ -24,9 +24,10 @@ from dataset import build_transform
 
 
 def load_onnx_session(onnx_path=config.ONNX_MODEL_PATH):
-    """
-    starts the ONNX session using ONNX runtime and points to the model files location.
-    """
+
+    # Read the input's name back from the session itself rather than hardcoding.
+    # This file and model_export.py could become out of sync if the name changed
+    # So asking the session directly means it can't.
     session = ort.InferenceSession(onnx_path)
     input_name = session.get_inputs()[0].name
     return session, input_name
@@ -35,6 +36,12 @@ def load_onnx_session(onnx_path=config.ONNX_MODEL_PATH):
 def benchmark_single_image(image_path, model, device, session, input_name, classes, n_repeats=20):
     img = Image.open(image_path)
     x = build_transform(augment=False)(img).unsqueeze(0)
+    # Two formats of the SAME preprocessed tensor, one per framework:
+    # pytorch wants a torch Tensor, ONNX Runtime session.run() wants a
+    # plain numpy array. Both are derived from the identical preprocessing
+    # pass on an identical image. This also keeps the timing/predication
+    # comparison valid.
+
     x_torch = x.to(device)
     x_np = x.numpy()
 
@@ -61,13 +68,23 @@ def benchmark_single_image(image_path, model, device, session, input_name, class
         start = time.perf_counter()
         onnx_logits = session.run(None, {input_name: x_np})[0]
         onnx_times.append((time.perf_counter() - start) * 1000)
-    onnx_probs = torch.softmax(torch.tensor(onnx_logits), dim=1)[0]
+
+        # session.run() returns a plain numpy array, not a torch tensor.
+        # wrap it back into one so the same torch.softmax() call can be reused,
+        # rather than needing a separate numpy-based softmax implementation
+        # just for this branch.
+    onnx_probs = torch.softmax(torch.tensor(onnx_logits), dim=1)[0] # see model.py for logits definition
     onnx_pred = classes[int(onnx_probs.argmax())]
     onnx_conf = float(onnx_probs.max())
 
     return {
         "image": image_path,
         "torch_pred": torch_pred, "torch_conf": torch_conf,
+
+        # Both avg and min reported: avg reflects typical real-world timing
+        # including any incidental OS/system noise between calls.
+        # min shows the best case speed with that noise mostly stripped out
+        # Useful for seeing how much of the avg is lost to bottleneck.
         "torch_avg_ms": sum(torch_times) / len(torch_times), "torch_min_ms": min(torch_times),
         "onnx_pred": onnx_pred, "onnx_conf": onnx_conf,
         "onnx_avg_ms": sum(onnx_times) / len(onnx_times), "onnx_min_ms": min(onnx_times),
@@ -86,6 +103,10 @@ def main(image_paths, n_repeats=20):
     for path in image_paths:
         r = benchmark_single_image(path, model, device, session, input_name, classes, n_repeats)
         results.append(r)
+        # Correctness check, not just a speed comparison
+        # a faster backend that disagrees with pytorch on the actual prediction
+        # would be a much bigger problem than any timing numbers.
+        # This is flagged rather than lost in the output.
         match = "same prediction" if r["torch_pred"] == r["onnx_pred"] else "MISMATCH - investigate"
         print(f"{path}")
         print(f"  PyTorch: {r['torch_pred']} ({r['torch_conf']:.1%})  "
@@ -94,6 +115,9 @@ def main(image_paths, n_repeats=20):
               f"avg={r['onnx_avg_ms']:.3f}ms  min={r['onnx_min_ms']:.3f}ms  [{match}]")
         print()
 
+    # Overall speedup ration across every image benchmarked, not just this one.
+    # a single image's timing can be noisy; averaging across several gives
+    # a steady, more trustworthy number to actually use.
     avg_torch = sum(r["torch_avg_ms"] for r in results) / len(results)
     avg_onnx = sum(r["onnx_avg_ms"] for r in results) / len(results)
     ratio = avg_torch / avg_onnx if avg_onnx else float("nan")

@@ -251,13 +251,14 @@ class ShellSorterGUI:
                      font=(FONT_FAMILY, 9), wraplength=280, justify="left").pack(anchor="w", pady=(8, 0))
             self.camera_status_vars[name] = status_var
 
-        # --- Timing (secondary info, deliberately understated) -----------
+        # ------------------------ Timing (secondary info) ----------------------
         self.timing_var = tk.StringVar(value="")
         tk.Label(root, textvariable=self.timing_var, bg=COLOUR_BG, fg=COLOUR_TEXT_MUTED,
                  font=("Consolas", 9)).pack(pady=(4, 8))
 
-        # --- Buttons: Trigger is the primary action, larger and accented;
-        # Connect/Save are secondary --------------------------------------
+        # ---------------------------- Buttons ------------------------------------
+        # Trigger is the primary action, larger and accented;
+        # Connect/Save are secondary
         btn_frame = tk.Frame(root, bg=COLOUR_BG)
         btn_frame.pack(pady=(4, 20))
         self.connect_btn = ttk.Button(btn_frame, text="Connect Cameras", style="Secondary.TButton",

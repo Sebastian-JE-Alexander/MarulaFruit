@@ -1,9 +1,9 @@
 """
 -------------------------- config.py ---------------------------------------
+Single source for constants used across the project.
 
-Single source of for constants used across the project.
-
-Importing from here means changing a value once actually changes it everywhere.
+Importing config.py means a value only needs to be changed in one place
+for it to be updated everywhere its called.
 -------------------------------------------------------------------------------
 """
 
@@ -25,11 +25,14 @@ TRAINING_LOG_PATH = f"{OUTPUTS_DIR}/training_log.csv"
 TRAINING_DURATION_PATH = f"{OUTPUTS_DIR}/training_duration.txt"
 TRAINING_HISTORY_PLOT_PATH = f"{OUTPUTS_DIR}/training_history.png"
 CONFUSION_MATRIX_PLOT_PATH = f"{OUTPUTS_DIR}/confusion_matrix.png"
+
 MISCLASSIFIED_DIR = f"{OUTPUTS_DIR}/misclassified"
 SEGMENTATION_CHECK_DIR = f"{OUTPUTS_DIR}/segmentation_check"
+
 CAMERA_RESULTS_LOG_PATH = f"{OUTPUTS_DIR}/camera_results_log.csv"
 CAMERA_CAPTURES_DIR = f"{OUTPUTS_DIR}/camera_captures"
 LIVE_ERROR_CAPTURES_DIR = f"{OUTPUTS_DIR}/live_error_captures"
+
 ONNX_MODEL_PATH = f"{OUTPUTS_DIR}/shell_classifier.onnx"
 ONNX_CLASSES_PATH = f"{OUTPUTS_DIR}/shell_classifier_onnx_classes.txt"
 
@@ -37,11 +40,12 @@ ONNX_CLASSES_PATH = f"{OUTPUTS_DIR}/shell_classifier_onnx_classes.txt"
 # you need a specific one - otherwise camera_gui.py autodetects the
 # first image file it finds.
 
-LOGO_PATH = None
 LOGO_DIR = "logos"
+LOGO_PATH = f"{LOGO_DIR}/granroth_logo.png"
 
 
-# ------------------------------------------------------------------------
+
+# -------------------------------- ONNX Model ----------------------------
 # Set True to run inference via ONNX Runtime instead of PyTorch (see
 # model_export.py to create the .onnx file first). ONNX_PROVIDERS lists
 # execution providers in preference order - CUDAExecutionProvider needs
@@ -77,6 +81,8 @@ CAMERA_NAMES = ["CAM_1", "CAM_3"] #adjust camera count by adding user_id set in 
 
 # How often live_camera.py grabs+classifies a new frame - lower = more
 # responsive but more CPU/GPU load. 400ms (~2.5fps)
+# Note: there is a lower limit that will be hit where no gains in FPS
+#       will happen, (e.g. difference between 0ms and 10ms)
 LIVE_POLL_INTERVAL_MS = 50
 
 # ---------------------------- Display Colours --------------------------------
@@ -86,7 +92,6 @@ CLASS_COLOURS = {
     "bad": (0, 0, 255)
 }
 DEFAULT_COLOUR = (128, 0, 128)
-
 
 # CLASS_NAMES is deliberately NOT hardcoded here - it's inferred from the
 # actual dataset_images/train/<class>/ folder names at load time (see
